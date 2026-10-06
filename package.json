@@ -1,0 +1,24 @@
+{
+  "name": "sms-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev:ingest": "wrangler dev --config workers/ingest/wrangler.jsonc",
+    "dev:dashboard": "wrangler dev --config workers/dashboard/wrangler.jsonc",
+    "deploy:ingest": "wrangler deploy --config workers/ingest/wrangler.jsonc",
+    "deploy:dashboard": "wrangler deploy --config workers/dashboard/wrangler.jsonc",
+    "db:migrate": "wrangler d1 migrations apply sms-dashboard --remote --config workers/ingest/wrangler.jsonc"
+  },
+  "dependencies": {"jose": "^6.0.0"},
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251001.0",
+    "@types/node": "^22.0.0",
+    "miniflare": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0",
+    "wrangler": "^4.0.0"
+  },
+  "engines": {"node": ">=22"}
+}

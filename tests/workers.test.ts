@@ -1,0 +1,32 @@
+import {afterAll,beforeAll,beforeEach,describe,expect,it} from 'vitest';
+import {Miniflare} from 'miniflare';
+import {readFile} from 'node:fs/promises';
+import ingestion from '../workers/ingest/src/index';
+import dashboard from '../workers/dashboard/src/index';
+import {data} from '../workers/dashboard/src/data';
+import {Env,encodeCursor} from '../shared/validation';
+let mf:Miniflare;let env:Env;
+const number='+972501234567',other='+972501234568',peer='+972509876543',token='a'.repeat(40),outToken='b'.repeat(40);
+beforeAll(async()=>{mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("test")}}',compatibilityDate:'2026-10-06',d1Databases:{DB:'sms-test'}});const bindings=await mf.getBindings();env={DB:bindings.DB as D1Database,INGEST_CREDENTIALS_JSON:JSON.stringify([{token,source:'incoming',direction:'in',numbers:[number]},{token:outToken,source:'workflow',direction:'out',numbers:[number]}])};const schema=await readFile(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8');await env.DB.exec(schema);});
+afterAll(async()=>{await mf?.dispose();});
+beforeEach(async()=>{await env.DB.exec(`DELETE FROM messages; DELETE FROM user_numbers; DELETE FROM system_numbers; INSERT INTO system_numbers VALUES ('${number}','Office',1),('${other}','Sales',1); INSERT INTO user_numbers VALUES ('alice@example.com','${number}'),('alice@example.com','${other}'),('bob@example.com','${other}'),('shared@example.com','${number}');`);});
+function send(body:Record<string,unknown>,out=false,secret=out?outToken:token){return ingestion.fetch(new Request('https://ingest.test'+(out?'/events/outgoing':'/hooks/incoming'),{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+secret},body:JSON.stringify({event_id:'event-1',system_number:number,peer_number:peer,body:'שלום 👋\n& + "בדיקה"',...body})}),env);}
+async function read(email:string,query=''){const r=await data(new URL('https://dashboard.test/api/messages'+query),env,email);return r.json() as Promise<{messages:Record<string,unknown>[];sync_cursor:string;next_cursor:string|null}>;}
+describe('ingestion',()=>{
+ it('preserves Unicode and deduplicates stable IDs but not different IDs',async()=>{expect((await send({})).status).toBe(200);expect((await send({})).status).toBe(200);await send({event_id:'event-2'});const rows=await read('alice@example.com');expect(rows.messages).toHaveLength(2);expect(rows.messages[0].body).toBe('שלום 👋\n& + "בדיקה"');});
+ it('does not deduplicate unidentified legitimate messages',async()=>{await send({event_id:undefined});await send({event_id:undefined});expect((await read('alice@example.com')).messages).toHaveLength(2);});
+ it('rejects invalid credentials and number scope',async()=>{expect((await send({},false,'bad')).status).toBe(401);expect((await send({system_number:other})).status).toBe(403);expect((await send({},true,token)).status).toBe(401);});
+ it('rejects inactive numbers and malformed bodies',async()=>{await env.DB.prepare('UPDATE system_numbers SET active=0 WHERE number=?').bind(number).run();expect((await send({})).status).toBe(403);await env.DB.prepare('UPDATE system_numbers SET active=1').run();expect((await send({body:''})).status).toBe(400);expect((await send({body:'x'.repeat(33000)})).status).toBe(413);});
+ it('detects conflicting event reuse',async()=>{await send({});expect((await send({body:'different'})).status).toBe(409);});
+ it('returns retryable failure on database errors',async()=>{const broken={...env,DB:{prepare(){throw new Error('storage unavailable');}} as unknown as D1Database};const r=await ingestion.fetch(new Request('https://ingest.test/hooks/incoming',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({system_number:number,peer_number:peer,body:'test'})}),broken);expect(r.status).toBe(503);});
+});
+describe('outgoing events',()=>{
+ it('updates old pending messages incrementally and does not regress final status',async()=>{await send({submission_status:'pending',occurred_at:'2020-01-01T00:00:00Z'},true);const before=await env.DB.prepare('SELECT updated_at,id FROM messages').first<{updated_at:number;id:number}>();expect(before).not.toBeNull();await send({submission_status:'accepted'},true);await send({submission_status:'pending'},true);const rows=await read('alice@example.com','?since='+encodeCursor({t:before!.updated_at,id:before!.id}));expect(rows.messages).toHaveLength(1);expect(rows.messages[0].submission_status).toBe('accepted');expect(rows.messages[0].occurred_at).toBe(Date.parse('2020-01-01T00:00:00Z'));expect((await send({submission_status:'rejected'},true)).status).toBe(409);});
+ it('requires an outgoing event ID',async()=>{expect((await send({event_id:undefined,submission_status:'pending'},true)).status).toBe(400);});
+});
+describe('authorization',()=>{
+ beforeEach(async()=>{await send({});await env.DB.prepare('INSERT INTO messages(event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').bind('other','in',other,peer,'sales',1,1,'receipt',1).run();});
+ it('supports multi-number users, shared assignments and empty users',async()=>{expect((await read('alice@example.com')).messages).toHaveLength(2);expect((await read('bob@example.com')).messages.map(m=>m.system_number)).toEqual([other]);expect((await read('shared@example.com')).messages.map(m=>m.system_number)).toEqual([number]);expect((await read('none@example.com')).messages).toHaveLength(0);});
+ it('rejects unauthorized number selection and preserves peer/search/cursor isolation',async()=>{await expect(read('bob@example.com','?system_number='+encodeURIComponent(number))).rejects.toMatchObject({status:403});const r=await read('bob@example.com','?peer_number='+encodeURIComponent(peer)+'&q=שלום');expect(r.messages).toHaveLength(0);const p=await read('bob@example.com','?cursor='+encodeCursor({t:Date.now(),id:999}));expect(p.messages.map(m=>m.system_number)).toEqual([other]);const updates=await read('bob@example.com','?since='+encodeCursor({t:0,id:0}));expect(updates.messages.map(m=>m.system_number)).toEqual([other]);});
+ it('does not trust an email header and fails closed without Access',async()=>{const r=await dashboard.fetch(new Request('https://dashboard.test/api/messages',{headers:{'Cf-Access-Authenticated-User-Email':'alice@example.com'}}),{...env,ACCESS_ISSUER:'https://test.cloudflareaccess.com',ACCESS_AUD:'aud'});expect(r.status).toBe(401);expect(r.headers.get('Cache-Control')).toBe('no-store');});
+});
