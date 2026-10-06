@@ -29,22 +29,20 @@ INSERT INTO system_numbers(number,label) VALUES ('+972501234567','Office');
 INSERT INTO user_numbers(email,system_number) VALUES ('alice@example.com','+972501234567');
 ```
 
-## Ingestion credentials
+## Ingestion secrets
 
-Create separate random tokens of at least 32 characters for incoming and outgoing producers. These are our ingestion secrets, NOT Micropay API account tokens. Set INGEST_CREDENTIALS_JSON as a Worker secret:
+The ingestion Worker is public and Micropay does not sign its callbacks, so every request must carry one of two secrets. These are our own secrets, NOT the Micropay account token. Generate each with `openssl rand -hex 32` (at least 32 characters are required) and store them as Worker secrets:
 
 ```sh
-npx wrangler secret put INGEST_CREDENTIALS_JSON --config workers/ingest/wrangler.jsonc
+npx wrangler secret put INCOMING_TOKEN --config workers/ingest/wrangler.jsonc
+npx wrangler secret put OUTGOING_TOKEN --config workers/ingest/wrangler.jsonc
 ```
 
-```json
-[
- {"token":"REPLACE_WITH_RANDOM_INCOMING_TOKEN","source":"micropay-office","direction":"in","numbers":["+972501234567"]},
- {"token":"REPLACE_WITH_RANDOM_OUTGOING_TOKEN","source":"workflow-office","direction":"out","numbers":["+972501234567"]}
-]
-```
+- INCOMING_TOKEN authorizes incoming messages. Micropay can only be configured with a URL, so set the service's callback address to `https://YOUR-INGEST-HOST/hooks/micropay/incoming?token=INCOMING_TOKEN`.
+- OUTGOING_TOKEN authorizes outgoing logs from your sending workflow.
+- The normalized routes accept only an `Authorization: Bearer TOKEN` header; only the Micropay route also accepts `?token=`.
 
-Tokens are unique and explicitly scoped; no wildcard exists. Rotate tokens while retaining the source namespace for the same producer. Prefer Authorization: Bearer TOKEN. The vendor route optionally accepts a query parameter named hook_token ONLY when MICROPAY_ALLOW_URL_TOKEN is exactly true in the ingestion Worker's configuration. This is an application compatibility option, not a documented Micropay signature. Verify that the configured service or automation preserves the query parameter. Never reuse the Micropay account token. Redact query credentials from Cloudflare logs, analytics, traces and support captures before enabling this option; this repository does not configure platform log redaction. Outgoing and normalized routes remain header-only.
+Treat the Micropay callback URL as a secret, since anything that records full URLs records the token. To rotate INCOMING_TOKEN, update the secret and the Micropay URL together; callbacks arriving in between fail, and Micropay may send its configured error SMS for them.
 
 ## Documented incoming callback
 
@@ -59,22 +57,21 @@ Field mapping:
 | dest | Receiving system number |
 | msgid | Stable incoming event ID, preserving leading zeros |
 
-The adapter requires nonempty origsms and msgid; it never reconstructs full text from sms or code. cid, code, sms and net are not persisted. Local Israeli and digits-only international phone formats normalize to +country-number. If dest is absent, only a validated single-number credential may supply it. A supplied dest must pass credential scope and active-number checks. The documented callback has no timestamp, so occurrence time uses receipt time with time_source=receipt.
+The adapter requires nonempty origsms and msgid; it never reconstructs full text from sms or code. cid, code, sms and net are not persisted. Local Israeli and digits-only international phone formats normalize to +country-number. dest is required and must be an active registered system number. The documented callback has no timestamp, so occurrence time uses receipt time with time_source=receipt.
 
 After successful persistence, GET/form callbacks return exactly HTTP 200 with OK. JSON callbacks return HTTP 200 with {"reply":""}. These responses request NO automatic reply SMS. Do not return the normalized ingestion response to a Dynamic Text service: arbitrary response text can become an SMS reply. Storage/authentication/validation errors return non-200 and never a false success; the documented Dynamic Text service may send its configured fixed error to the customer on non-200 responses.
 
-Example, with a separately configured ingestion secret:
+Example:
 
 ```sh
-curl -X POST https://YOUR-INGEST-HOST/hooks/micropay/incoming \
- -H "Authorization: Bearer $INCOMING_TOKEN" \
+curl -X POST "https://YOUR-INGEST-HOST/hooks/micropay/incoming?token=$INCOMING_TOKEN" \
  -H 'Content-Type: application/json' \
  --data '{"origsms":"שלום, אפשר פרטים?","phone":"0509876543","dest":"0501234567","msgid":"00705d38b642d5423","cid":"12762"}'
 ```
 
 ## Normalized events and outgoing logs
 
-Existing POST /hooks/incoming and POST /events/outgoing still accept normalized JSON with header authentication:
+POST /hooks/incoming (INCOMING_TOKEN) and POST /events/outgoing (OUTGOING_TOKEN) accept normalized JSON with header authentication. system_number is required:
 
 ```json
 {"event_id":"stable-workflow-id","system_number":"+972501234567","peer_number":"+972509876543","body":"שלום","occurred_at":"2026-10-06T09:40:00Z"}

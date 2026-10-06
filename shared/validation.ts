@@ -1,4 +1,4 @@
-export interface Env { DB: D1Database; INGEST_CREDENTIALS_JSON?: string; ACCESS_ISSUER?: string; ACCESS_AUD?: string }
+export interface Env { DB: D1Database; INCOMING_TOKEN?: string; OUTGOING_TOKEN?: string; ACCESS_ISSUER?: string; ACCESS_AUD?: string }
 export class HttpError extends Error { constructor(public status: number, message: string) { super(message); } }
 export function json(data: unknown, status = 200): Response { return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } }); }
 export function failure(error: unknown): Response { return error instanceof HttpError ? json({error: error.message}, error.status) : json({error: 'Temporary service failure'}, 503); }

@@ -28,8 +28,7 @@ export async function readMicropay(request: Request): Promise<{event:Record<stri
   for(const key of ['origsms','phone','dest','msgid']) if(url.searchParams.has(key)) throw new HttpError(400,'Callback fields must be in the POST body');
  }else throw new HttpError(405,'GET or POST required');
  for(const key of ['event_id','system_number','peer_number','body','occurred_at','type','submission_status']) if(Object.hasOwn(payload,key)) throw new HttpError(400,'Use the correct ingestion route');
- const event:Record<string,unknown>={event_id:text(payload.msgid,'msgid',256),peer_number:vendorPhone(payload.phone),body:text(payload.origsms,'origsms',10000)};
- if(payload.dest!==undefined)event.system_number=vendorPhone(payload.dest);
+ const event:Record<string,unknown>={event_id:text(payload.msgid,'msgid',256),system_number:vendorPhone(payload.dest),peer_number:vendorPhone(payload.phone),body:text(payload.origsms,'origsms',10000)};
  return {event,json:isJson};
 }
 export function micropayAcknowledgement(isJson:boolean):Response {
