@@ -16,10 +16,10 @@ The README documents setup, routes, field mapping and operations in detail.
 | Area | State |
 | --- | --- |
 | Code | `main` is pushed to GitHub. CI runs typecheck and tests on every push. |
-| Dashboard | Deployed (version `ace59d41`): table view with sorting, filters, stats and 5-second live updates. Access protection verified: unauthenticated requests get 302 to the Access login. **Not yet deployed:** row spacing, users and roles, the admin page and sending (see Rollout below). |
-| Ingest | Deployed (version `8c1f4340`) with the two-secret auth. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
+| Dashboard | Deployed (version `2dede4fd`): table, row spacing, users and roles, admin page and sending. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
+| Ingest | Deployed (version `31c5a24a`) with the two-secret auth and opt-out detection. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
-| D1 | `0001` applied. One system number registered and assigned to the owner's email. `0002` (users, settings, opt-outs, sends, activity log) is not applied yet. |
+| D1 | `0001` and `0002` applied. One system number registered; the owner's email is the only user and is an admin. |
 | Outgoing logging | Not wired yet. Nothing posts to `/events/outgoing`, so the dashboard shows incoming messages only. |
 
 ## Local-only state on the owner's machine
@@ -90,10 +90,10 @@ npx wrangler d1 execute sms-dashboard --remote --config workers/ingest/wrangler.
 
 Order matters: the migration must exist before code that uses it, and the Access policy may only be opened after the user allowlist is live.
 
-1. Apply `0002`: `npm run db:migrate`. Existing assigned emails become regular users.
-2. Make the owner an admin with the SQL in the README setup section.
+1. Done: applied `0002` (`npm run db:migrate`); existing assigned emails became regular users.
+2. Done: made the owner an admin.
 3. The owner creates a Micropay API token with SMS permissions and runs `npx wrangler secret put MICROPAY_TOKEN --config workers/dashboard/wrangler.jsonc`.
-4. Deploy ingest (opt-out detection), then the dashboard.
+4. Done: deployed ingest (opt-out detection), then the dashboard.
 5. In Zero Trust, change the dashboard Access policy to admit any email that completes One-time PIN, so users added on the admin page can sign in.
 6. Send one test message to the owner's own phone and confirm the sender format Micropay accepts.
 
