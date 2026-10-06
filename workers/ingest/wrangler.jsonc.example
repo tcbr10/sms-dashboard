@@ -1,0 +1,12 @@
+// Copy to wrangler.jsonc in this folder (git-ignored) and replace every REPLACE_WITH value.
+{
+  "name": "sms-ingest",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-06",
+  "workers_dev": false,
+  "preview_urls": false,
+  // A hostname in a zone of the same Cloudflare account. Never put an Access application on it: Micropay cannot log in.
+  // To use the account's workers.dev address instead, set "workers_dev" to true and remove "routes".
+  "routes": [{"pattern": "REPLACE_WITH_INGEST_HOSTNAME", "custom_domain": true}],
+  "d1_databases": [{"binding": "DB", "database_name": "sms-dashboard", "database_id": "REPLACE_WITH_D1_DATABASE_ID", "migrations_dir": "../../migrations"}]
+}

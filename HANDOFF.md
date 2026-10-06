@@ -24,9 +24,8 @@ The README documents setup, routes, field mapping and operations in detail.
 
 ## Local-only state on the owner's machine
 
-- **`workers/dashboard/wrangler.jsonc` and `workers/ingest/wrangler.jsonc` have uncommitted real values**: `database_id`, `ACCESS_ISSUER`, `ACCESS_AUD`, the custom-domain `routes`, and `workers_dev: false` / `preview_urls: false` on ingest. Deploys read them from the working tree. Keep them out of commits. The committed files hold placeholders.
-- **Committing other changes in those files:** stage a sanitized copy instead of the working file (`git update-index --cacheinfo 100644,$(git hash-object -w <sanitized-file>),<path>`). Interactive `git add -p` isn't available to Claude.
-- **Switching branches** fails while those edits differ from the target branch. Fast-forward without checkout (`git fetch . <branch>:main`) or stash first.
+- **`workers/dashboard/wrangler.jsonc` and `workers/ingest/wrangler.jsonc` are git-ignored** and exist only on the owner's machine. They hold the real `database_id`, `ACCESS_ISSUER`, `ACCESS_AUD` and custom-domain `routes`, and deploys read them. The committed `wrangler.jsonc.example` files are the templates. When a config setting changes (not a real value), update the matching `.example` file too.
+- **Commits before `wrangler.jsonc` was ignored still track it with placeholders.** Checking one out will refuse to overwrite the local files, so move them aside first.
 - **Wrangler auth:** a named auth profile is bound to this directory (`npx wrangler auth list`). Other profiles on the machine belong to other Cloudflare accounts; don't use them for this project. The custom domains, D1, both Workers and the Access app are all in the account this directory's profile uses.
 - `.DS_Store` files are untracked; consider adding them to `.gitignore`.
 

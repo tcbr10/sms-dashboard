@@ -20,9 +20,11 @@ npm run typecheck
 npm test
 npx wrangler login
 npx wrangler d1 create sms-dashboard
+cp workers/dashboard/wrangler.jsonc.example workers/dashboard/wrangler.jsonc
+cp workers/ingest/wrangler.jsonc.example workers/ingest/wrangler.jsonc
 ```
 
-Replace REPLACE_WITH_D1_DATABASE_ID in both Worker configurations with the same database ID, then run npm run db:migrate. Register normalized international system numbers and lowercase, trimmed user emails through D1 SQL. Multiple numbers per user and explicitly shared numbers are supported.
+The copied wrangler.jsonc files are git-ignored because they hold account-specific values; only the .example files are committed. Replace REPLACE_WITH_D1_DATABASE_ID in both with the same database ID, then run npm run db:migrate. The other REPLACE_WITH values (Access settings and custom-domain hostnames) are covered below. Register normalized international system numbers and lowercase, trimmed user emails through D1 SQL. Multiple numbers per user and explicitly shared numbers are supported.
 
 ```sql
 INSERT INTO system_numbers(number,label) VALUES ('+972501234567','Office');
@@ -85,7 +87,7 @@ Deploy the configured ingestion Worker with npm run deploy:ingest. Do not change
 
 ## Dashboard and operations
 
-Set ACCESS_ISSUER to https://YOUR-TEAM.cloudflareaccess.com and ACCESS_AUD to your Access application's audience. Configure a custom hostname route protected by Access and an explicit user policy, then deploy using npm run deploy:dashboard. Dashboard workers.dev and preview URLs stay disabled. Every request verifies the JWT issuer, audience, signature and expiry; email headers and query parameters are not identities. Every message query enforces D1 assignments.
+Set ACCESS_ISSUER to https://YOUR-TEAM.cloudflareaccess.com and ACCESS_AUD to your Access application's audience. Set the dashboard hostname in routes, protect it with an Access application and an explicit user policy, then deploy using npm run deploy:dashboard. Dashboard workers.dev and preview URLs stay disabled. Every request verifies the JWT issuer, audience, signature and expiry; email headers and query parameters are not identities. Every message query enforces D1 assignments.
 
 The UI is a table of messages, 100 per page with more loaded on scroll. Columns sort server-side (time, direction, customer, system number, submission status) with keyset cursors. Filters cover text search, direction, system number, submission status, date range and a single customer (click a customer number), and the filter state is kept in the page URL. Summary counts come from /api/stats for the same filter. Visible tabs poll every 5 seconds, background tabs every 30 seconds, without overlapping requests; updated-time/ID cursors pick up new messages and status changes. Each open tab therefore makes about 12 small D1 queries a minute. textContent rendering, nonce CSP and no-store responses are retained. Display timezone and date-filter day boundaries are Asia/Jerusalem.
 

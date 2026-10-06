@@ -8,3 +8,6 @@ coverage/
 *.sqlite
 *.sqlite3
 backups/
+
+# Real Worker configs hold account-specific values; copy them from wrangler.jsonc.example
+workers/*/wrangler.jsonc
