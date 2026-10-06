@@ -11,7 +11,7 @@ export async function readBody(request: Request): Promise<Record<string, unknown
  const reader = request.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
  for (;;) { const {done, value} = await reader.read(); if (done) break; size += value.byteLength; if (size > max) { await reader.cancel(); throw new HttpError(413, 'Body too large'); } chunks.push(value); }
  const bytes = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
- try { const body: unknown = JSON.parse(new TextDecoder('utf-8', {fatal:true}).decode(bytes)); if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error(); return body as Record<string, unknown>; } catch { throw new HttpError(400, 'Invalid JSON object'); }
+ try { const body: unknown = JSON.parse(new TextDecoder('utf-8', {fatal:true,ignoreBOM:false}).decode(bytes)); if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error(); return body as Record<string, unknown>; } catch { throw new HttpError(400, 'Invalid JSON object'); }
 }
 export function timestamp(value: unknown, fallback: number): number { if (value === undefined) return fallback; if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value)) throw new HttpError(400, 'occurred_at must be an ISO timestamp with timezone'); const n = Date.parse(value); if (!Number.isFinite(n) || n < 0) throw new HttpError(400, 'Invalid occurred_at'); return n; }
 export type Cursor = {t: number; id: number};

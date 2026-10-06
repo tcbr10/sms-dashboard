@@ -11,7 +11,9 @@
     "deploy:dashboard": "wrangler deploy --config workers/dashboard/wrangler.jsonc",
     "db:migrate": "wrangler d1 migrations apply sms-dashboard --remote --config workers/ingest/wrangler.jsonc"
   },
-  "dependencies": {"jose": "^6.0.0"},
+  "dependencies": {
+    "jose": "^6.0.0"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261006.1",
     "@types/node": "^22.0.0",
@@ -20,5 +22,7 @@
     "vitest": "^3.0.0",
     "wrangler": "4.147.0"
   },
-  "engines": {"node": ">=22"}
+  "engines": {
+    "node": ">=22"
+  }
 }

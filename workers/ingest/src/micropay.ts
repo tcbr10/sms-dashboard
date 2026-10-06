@@ -13,7 +13,7 @@ async function form(request: Request): Promise<Record<string, unknown>> {
  const reader=request.body.getReader(); const chunks:Uint8Array[]=[]; let size=0;
  for (;;) {const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>32768){await reader.cancel();throw new HttpError(413,'Payload too large');}chunks.push(value);}
  const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
- let raw:string;try{raw=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{throw new HttpError(400,'Invalid UTF-8');}
+ let raw:string;try{raw=new TextDecoder('utf-8',{fatal:true,ignoreBOM:false}).decode(bytes);}catch{throw new HttpError(400,'Invalid UTF-8');}
  return params(raw);
 }
 function vendorPhone(value: unknown): string {const raw=text(value,'Micropay phone',64).replace(/[\s().-]/g,'');return phone(/^[1-9]\d{7,14}$/.test(raw)?'+'+raw:raw);}
