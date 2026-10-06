@@ -1,6 +1,8 @@
 // Browser code lives in String.raw templates, so it must not contain backticks or "${".
 const css = String.raw`
-:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--field:#fff;--ink:#0b0b0b;--ink2:#52514e;--muted:#6f6d68;--line:#e1e0d9;--ring:rgba(11,11,11,.1);--hover:rgba(11,11,11,.035);--accent:#2a78d6;--accent-ink:#1d5fb0;--in:#2a78d6;--out:#eb6834;--good:#0ca30c;--warn:#fab219;--bad:#d03b3b;--neutral:#898781;--shadow:0 1px 2px rgba(11,11,11,.04),0 2px 12px rgba(11,11,11,.04)}
+:root{--pad-y:11px;--pad-x:12px;--clamp:2;--row-font:14.5px;--card-pad:12px;color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--field:#fff;--ink:#0b0b0b;--ink2:#52514e;--muted:#6f6d68;--line:#e1e0d9;--ring:rgba(11,11,11,.1);--hover:rgba(11,11,11,.035);--accent:#2a78d6;--accent-ink:#1d5fb0;--in:#2a78d6;--out:#eb6834;--good:#0ca30c;--warn:#fab219;--bad:#d03b3b;--neutral:#898781;--shadow:0 1px 2px rgba(11,11,11,.04),0 2px 12px rgba(11,11,11,.04)}
+:root[data-density=wide]{--pad-y:17px;--pad-x:14px;--clamp:3;--card-pad:16px}
+:root[data-density=dense]{--pad-y:5px;--pad-x:10px;--clamp:1;--row-font:13.5px;--card-pad:8px}
 @media (prefers-color-scheme:dark){:root{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--field:#222221;--ink:#fff;--ink2:#c3c2b7;--muted:#9a988f;--line:#2c2c2a;--ring:rgba(255,255,255,.1);--hover:rgba(255,255,255,.045);--accent:#3987e5;--accent-ink:#8bb8f0;--in:#3987e5;--out:#d95926;--shadow:none}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--page);color:var(--ink);font:14.5px/1.5 system-ui,-apple-system,"Segoe UI","Noto Sans Hebrew",Arial,sans-serif}
@@ -17,6 +19,10 @@ button,input,select{font:inherit;color:inherit}
 h1{margin:0;font-size:17px;font-weight:650;letter-spacing:-.01em}
 .sub{margin:0;font-size:12.5px;color:var(--muted)}
 .top-end{display:flex;align-items:center;gap:12px;min-width:0}
+.density{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--ring);border-radius:9px}
+.density button{display:grid;place-items:center;width:30px;height:28px;border:0;border-radius:7px;background:transparent;color:var(--muted);cursor:pointer}
+.density button:hover{color:var(--ink)}
+.density button[aria-pressed=true]{background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--ink)}
 .live{display:inline-flex;align-items:center;gap:8px;padding:4px 12px;border:1px solid var(--ring);border-radius:999px;background:var(--hover);font-size:13px;color:var(--ink2);white-space:nowrap}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--neutral)}
 .live.ok .dot{background:var(--good);animation:pulse 2s ease-out infinite}
@@ -69,7 +75,8 @@ th[aria-sort=ascending],th[aria-sort=descending]{color:var(--ink)}
 .sort-i{display:inline-flex;color:var(--muted)}
 .sort-i .i{width:14px;height:14px}
 th[aria-sort=ascending] .sort-i,th[aria-sort=descending] .sort-i{color:var(--accent)}
-td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+td{padding:var(--pad-y) var(--pad-x);border-bottom:1px solid var(--line);vertical-align:top;font-size:var(--row-font)}
+[data-density=dense] .day,[data-density=dense] .clock{display:inline}[data-density=dense] .clock{margin-inline-start:6px}[data-density=dense] .num-sub{display:none}[data-density=dense] .dir{padding-block:0}
 tbody tr{cursor:pointer}
 tbody tr:hover>td{background:var(--hover)}
 tbody tr:focus-visible{outline-offset:-2px}
@@ -91,7 +98,7 @@ tr.fresh>td{animation:flash 2.6s ease-out}
 .peer:hover{text-decoration-color:currentColor}
 .num-label{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 .num-sub{display:block;font-size:12.5px;color:var(--muted)}
-.body{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext}
+.body{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:var(--clamp);white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext}
 tr.open .body{display:block;overflow:visible}
 .details{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);font-size:12.5px;color:var(--ink2);cursor:auto}
 .details b{margin-inline-end:6px;font-weight:600;color:var(--muted)}
@@ -119,7 +126,8 @@ tr.open .body{display:block;overflow:visible}
 .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat{padding:10px 12px}.stat dd{font-size:22px}
 .search{flex-basis:100%;max-width:none}.seg{flex:1 1 100%}.seg button{flex:1}.sort-m{display:block}.toolbar select{flex:1 1 calc(50% - 4px);min-width:0}.custom{flex:1 1 100%}.custom input{flex:1;min-width:0}
 .table-wrap{overflow:visible}table{min-width:0}colgroup,thead{display:none}table,tbody{display:block}
-tbody tr{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"dir peer time" "msg msg msg" "num num status";gap:8px 10px;padding:12px 14px;border-bottom:1px solid var(--line);border-inline-start:3px solid transparent}
+tbody tr{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"dir peer time" "msg msg msg" "num num status";gap:8px 10px;padding:var(--card-pad) 14px;border-bottom:1px solid var(--line);border-inline-start:3px solid transparent}
+[data-density=dense] tbody tr{gap:4px 10px}
 tr.in{border-inline-start-color:var(--in)}tr.out{border-inline-start-color:var(--out)}
 td{display:block;min-width:0;padding:0;border:0}
 tbody tr>td:first-child{border:0}
@@ -138,7 +146,7 @@ const chat = '<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 
 const html = String.raw`
 <header class="top"><div class="wrap">
  <div class="brand"><span class="logo">`+svg(chat)+String.raw`</span><div><h1>הודעות SMS</h1><p class="sub">צפייה בלבד · מצב הגשה אינו אישור מסירה</p></div></div>
- <div class="top-end"><span class="live" id="live" role="status" title="הנתונים מתעדכנים אוטומטית כל 5 שניות"><span class="dot"></span><span id="live-text">מתחבר…</span></span><span class="who" id="who"></span></div>
+ <div class="top-end"><div class="density" role="group" aria-label="מרווח שורות"><button type="button" data-density="wide" title="רחב" aria-label="רחב" aria-pressed="false">`+svg('<path d="M5 6h14M5 12h14M5 18h14"/>')+String.raw`</button><button type="button" data-density="narrow" title="צר" aria-label="צר" aria-pressed="true">`+svg('<path d="M5 6.5h14M5 10.5h14M5 14.5h14M5 18.5h14"/>')+String.raw`</button><button type="button" data-density="dense" title="צפוף" aria-label="צפוף" aria-pressed="false">`+svg('<path d="M5 5h14M5 8.5h14M5 12h14M5 15.5h14M5 19h14"/>')+String.raw`</button></div><span class="live" id="live" role="status" title="הנתונים מתעדכנים אוטומטית כל 5 שניות"><span class="dot"></span><span id="live-text">מתחבר…</span></span><span class="who" id="who"></span></div>
 </div></header>
 <main class="wrap">
  <dl class="stats" aria-label="סיכום לפי הסינון הנוכחי">
@@ -331,6 +339,10 @@ $('rows').addEventListener('keydown',function(e){if(e.target.tagName==='TR'&&(e.
 document.addEventListener('keydown',function(e){const tag=document.activeElement&&document.activeElement.tagName;if(e.key==='/'&&tag!=='INPUT'&&tag!=='SELECT'&&tag!=='TEXTAREA'){e.preventDefault();$('q').focus();}});
 document.addEventListener('visibilitychange',function(){if(document.hidden)return;unseen=0;title();clearTimeout(timer);tick().finally(schedule);});
 
+const DENSITIES=['wide','narrow','dense'];
+function density(v,save){if(!DENSITIES.includes(v))v='narrow';document.documentElement.dataset.density=v;for(const b of document.querySelectorAll('[data-density]'))b.setAttribute('aria-pressed',String(b.dataset.density===v));if(save)try{localStorage.setItem('density',v);}catch(e){}}
+for(const b of document.querySelectorAll('button[data-density]'))b.addEventListener('click',function(){density(b.dataset.density,true);});
+(function(){let v=null;try{v=localStorage.getItem('density');}catch(e){}density(v,false);})();
 readUrl();title();
 (async function(){try{const d=await get('/api/numbers');$('who').textContent=d.email||'';noNumbers=!d.numbers.length;
   for(const n of d.numbers){labels.set(n.number,n.label);const o=el('option','',n.label+' · '+local(n.number));o.value=n.number;$('number').append(o);}
