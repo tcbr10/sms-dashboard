@@ -1,0 +1,72 @@
+import {Env,HttpError,json,phone,readBody,recipient,text} from '../../../shared/validation';
+import {loadSettings,validateSettings} from '../../../shared/settings';
+import {User,audit} from './users';
+const DAY = 86400000;
+function email(value: unknown): string { const e = text(value,'email',254).trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw new HttpError(400,'Invalid email'); return e; }
+function name(value: unknown): string { if (value === undefined) return ''; if (typeof value !== 'string' || value.trim().length > 80) throw new HttpError(400,'Name must be at most 80 characters'); return value.trim(); }
+function dailyLimit(value: unknown): number|null { if (value === null || value === undefined) return null; if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 100000) throw new HttpError(400,'Daily limit must be empty or a whole number from 0 to 100000'); return value as number; }
+function flag(value: unknown, name: string): number { if (typeof value !== 'boolean') throw new HttpError(400,name+' must be true or false'); return value ? 1 : 0; }
+async function activeAdmins(env: Env): Promise<number> { return (await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role='admin' AND active=1").first<{n:number}>())?.n ?? 0; }
+export async function admin(request: Request, url: URL, env: Env, user: User): Promise<Response> {
+ if (user.role !== 'admin') throw new HttpError(403,'Admins only');
+ const path = url.pathname.slice('/api/admin/'.length);
+ if (request.method === 'GET') {
+  if (path === 'users') { const r = await env.DB.prepare("SELECT u.email,u.name,u.role,u.active,u.can_bulk_send,u.daily_limit,u.created_at,u.last_seen_at,(SELECT json_group_array(json_object('number',n.system_number,'can_send',n.can_send)) FROM user_numbers n WHERE n.email=u.email) AS numbers,(SELECT COALESCE(SUM(s.recipients),0) FROM sends s WHERE s.email=u.email AND s.created_at>? AND s.status!='rejected') AS sent_24h FROM users u ORDER BY u.role,u.name,u.email").bind(Date.now()-DAY).all<Record<string,unknown>>(); return json({users:r.results.map(u => ({...u,numbers:JSON.parse(String(u.numbers))}))}); }
+  if (path === 'numbers') return json({numbers:(await env.DB.prepare('SELECT s.number,s.label,s.active,(SELECT COUNT(*) FROM user_numbers u WHERE u.system_number=s.number) AS users FROM system_numbers s ORDER BY s.active DESC,s.label,s.number').all()).results});
+  if (path === 'settings') return json(await loadSettings(env.DB));
+  if (path === 'optouts') return json({optouts:(await env.DB.prepare('SELECT number,source,created_at,created_by FROM opt_outs ORDER BY created_at DESC LIMIT 5000').all()).results});
+  if (path === 'audit') { const before = Number(url.searchParams.get('before') || Number.MAX_SAFE_INTEGER); if (!Number.isSafeInteger(before)) throw new HttpError(400,'Invalid cursor'); const r = await env.DB.prepare('SELECT id,at,email,action,target,details FROM audit_log WHERE id<? ORDER BY id DESC LIMIT 101').bind(before).all<{id:number}>(); return json({entries:r.results.slice(0,100),more:r.results.length>100}); }
+  throw new HttpError(404,'Not found');
+ }
+ const body = await readBody(request, 65536);
+ if (path === 'users/save') {
+  const target = email(body.email); const create = body.create === true; const role = body.role; if (role !== 'admin' && role !== 'user') throw new HttpError(400,'Invalid role');
+  const label = name(body.name); const active = flag(body.active,'active'); const bulk = flag(body.can_bulk_send,'can_bulk_send'); const limit = dailyLimit(body.daily_limit);
+  if (!Array.isArray(body.numbers)) throw new HttpError(400,'numbers must be a list');
+  const numbers = new Map<string,number>(); for (const n of body.numbers) { if (!n || typeof n !== 'object') throw new HttpError(400,'Invalid number permission'); const v = n as Record<string,unknown>; numbers.set(phone(v.number),flag(v.can_send,'can_send')); }
+  if (numbers.size) { const known = (await env.DB.prepare('SELECT COUNT(*) AS n FROM system_numbers WHERE number IN (SELECT value FROM json_each(?))').bind(JSON.stringify([...numbers.keys()])).first<{n:number}>())?.n; if (known !== numbers.size) throw new HttpError(400,'Unknown system number'); }
+  const existing = await env.DB.prepare('SELECT role,active FROM users WHERE email=?').bind(target).first<{role:string;active:number}>();
+  if (create && existing) throw new HttpError(409,'A user with this email already exists'); if (!create && !existing) throw new HttpError(404,'User not found');
+  if (target === user.email && (role !== 'admin' || !active)) throw new HttpError(400,'You cannot remove your own admin rights or disable yourself');
+  if (existing?.role === 'admin' && existing.active && (role !== 'admin' || !active) && await activeAdmins(env) <= 1) throw new HttpError(400,'At least one active admin is required');
+  const assignments = [...numbers].map(([number,can_send]) => ({number,can_send}));
+  await env.DB.batch([
+   env.DB.prepare('INSERT INTO users (email,name,role,active,can_bulk_send,daily_limit,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET name=excluded.name,role=excluded.role,active=excluded.active,can_bulk_send=excluded.can_bulk_send,daily_limit=excluded.daily_limit').bind(target,label,role,active,bulk,limit,Date.now()),
+   env.DB.prepare('DELETE FROM user_numbers WHERE email=?').bind(target),
+   env.DB.prepare("INSERT INTO user_numbers (email,system_number,can_send) SELECT ?,json_extract(value,'$.number'),json_extract(value,'$.can_send') FROM json_each(?)").bind(target,JSON.stringify(assignments)),
+   audit(env,user.email,create ? 'user.create' : 'user.update',target,{name:label,role,active:!!active,can_bulk_send:!!bulk,daily_limit:limit,numbers:assignments}),
+  ]);
+  return json({ok:true});
+ }
+ if (path === 'users/delete') {
+  const target = email(body.email); if (target === user.email) throw new HttpError(400,'You cannot delete yourself');
+  const existing = await env.DB.prepare('SELECT role,active FROM users WHERE email=?').bind(target).first<{role:string;active:number}>(); if (!existing) throw new HttpError(404,'User not found');
+  if (existing.role === 'admin' && existing.active && await activeAdmins(env) <= 1) throw new HttpError(400,'At least one active admin is required');
+  await env.DB.batch([env.DB.prepare('DELETE FROM user_numbers WHERE email=?').bind(target),env.DB.prepare('DELETE FROM users WHERE email=?').bind(target),audit(env,user.email,'user.delete',target)]);
+  return json({ok:true});
+ }
+ if (path === 'numbers/save') {
+  const number = phone(body.number); const label = text(typeof body.label === 'string' ? body.label.trim() : body.label,'label',40); const active = flag(body.active,'active');
+  const exists = await env.DB.prepare('SELECT 1 FROM system_numbers WHERE number=?').bind(number).first();
+  if (body.create === true && exists) throw new HttpError(409,'This number already exists'); if (body.create !== true && !exists) throw new HttpError(404,'Number not found');
+  await env.DB.batch([env.DB.prepare('INSERT INTO system_numbers (number,label,active) VALUES (?,?,?) ON CONFLICT(number) DO UPDATE SET label=excluded.label,active=excluded.active').bind(number,label,active),audit(env,user.email,body.create === true ? 'number.create' : 'number.update',number,{label,active:!!active})]);
+  return json({ok:true});
+ }
+ if (path === 'settings') {
+  const current = await loadSettings(env.DB); const next = validateSettings({...current,...body});
+  const changed = (Object.keys(next) as (keyof typeof next)[]).filter(k => JSON.stringify(next[k]) !== JSON.stringify(current[k]));
+  if (changed.length) await env.DB.batch([...changed.map(k => env.DB.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(k,JSON.stringify(next[k]))),audit(env,user.email,'settings.update',null,Object.fromEntries(changed.map(k => [k,next[k]])))]);
+  return json(next);
+ }
+ if (path === 'optouts/add') {
+  if (!Array.isArray(body.numbers) || !body.numbers.length || body.numbers.length > 1000) throw new HttpError(400,'Add between 1 and 1000 numbers');
+  const valid = new Set<string>(); let invalid = 0; for (const n of body.numbers) { try { valid.add(recipient(n)); } catch { invalid++; } }
+  if (valid.size) await env.DB.batch([env.DB.prepare("INSERT INTO opt_outs (number,source,created_at,created_by) SELECT value,'manual',?,? FROM json_each(?) WHERE true ON CONFLICT(number) DO NOTHING").bind(Date.now(),user.email,JSON.stringify([...valid])),audit(env,user.email,'optout.add',null,{count:valid.size})]);
+  return json({added:valid.size,invalid});
+ }
+ if (path === 'optouts/remove') {
+  const number = phone(body.number); await env.DB.batch([env.DB.prepare('DELETE FROM opt_outs WHERE number=?').bind(number),audit(env,user.email,'optout.remove',number)]);
+  return json({ok:true});
+ }
+ throw new HttpError(404,'Not found');
+}

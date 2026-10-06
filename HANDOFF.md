@@ -4,10 +4,10 @@ Last updated 2026-10-06. Read this before changing or deploying anything. The re
 
 ## What this is
 
-A read-only, Hebrew RTL dashboard of SMS traffic on the owner's Micropay numbers. Two Cloudflare Workers share one D1 database:
+A Hebrew RTL dashboard of SMS traffic on the owner's Micropay numbers, with user management and manual sending by authorized users. Two Cloudflare Workers share one D1 database:
 
 - **Ingest Worker** (`workers/ingest`). Receives Micropay's incoming-SMS callbacks and outgoing-message logs, and stores them in D1. It sits on its own custom domain; `workers.dev` and preview URLs are off.
-- **Dashboard Worker** (`workers/dashboard`). Behind Cloudflare Access on its own custom domain. Every request verifies the Access JWT, and every query is limited to the numbers assigned to the signed-in email.
+- **Dashboard Worker** (`workers/dashboard`). Behind Cloudflare Access on its own custom domain. Every request verifies the Access JWT, then requires an active row in `users`; that table, not the Access policy, is the allowlist. Users see and send only from their assigned numbers; admins see every active number and manage everything at `/admin`.
 
 The README documents setup, routes, field mapping and operations in detail.
 
@@ -16,10 +16,10 @@ The README documents setup, routes, field mapping and operations in detail.
 | Area | State |
 | --- | --- |
 | Code | `main` is pushed to GitHub. CI runs typecheck and tests on every push. |
-| Dashboard | Deployed (version `ace59d41`): table view with sorting, filters, stats and 5-second live updates. Access protection verified: unauthenticated requests get 302 to the Access login. |
+| Dashboard | Deployed (version `ace59d41`): table view with sorting, filters, stats and 5-second live updates. Access protection verified: unauthenticated requests get 302 to the Access login. **Not yet deployed:** row spacing, users and roles, the admin page and sending (see Rollout below). |
 | Ingest | Deployed (version `8c1f4340`) with the two-secret auth. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
-| D1 | Migrated. One system number registered and assigned to the owner's email. |
+| D1 | `0001` applied. One system number registered and assigned to the owner's email. `0002` (users, settings, opt-outs, sends, activity log) is not applied yet. |
 | Outgoing logging | Not wired yet. Nothing posts to `/events/outgoing`, so the dashboard shows incoming messages only. |
 
 ## Local-only state on the owner's machine
@@ -27,7 +27,6 @@ The README documents setup, routes, field mapping and operations in detail.
 - **`workers/dashboard/wrangler.jsonc` and `workers/ingest/wrangler.jsonc` are git-ignored** and exist only on the owner's machine. They hold the real `database_id`, `ACCESS_ISSUER`, `ACCESS_AUD` and custom-domain `routes`, and deploys read them. The committed `wrangler.jsonc.example` files are the templates. When a config setting changes (not a real value), update the matching `.example` file too.
 - **Commits before `wrangler.jsonc` was ignored still track it with placeholders.** Checking one out will refuse to overwrite the local files, so move them aside first.
 - **Wrangler auth:** a named auth profile is bound to this directory (`npx wrangler auth list`). Other profiles on the machine belong to other Cloudflare accounts; don't use them for this project. The custom domains, D1, both Workers and the Access app are all in the account this directory's profile uses.
-- `.DS_Store` files are untracked; consider adding them to `.gitignore`.
 
 ## Code map
 
@@ -35,13 +34,19 @@ The README documents setup, routes, field mapping and operations in detail.
 | --- | --- |
 | `workers/ingest/src/index.ts` | Routes, `authorize()` (secret check), `store()` (validation, dedup on `[direction, event_id]`, D1 upsert) |
 | `workers/ingest/src/micropay.ts` | Parses Micropay GET/form/JSON callbacks; no-reply acknowledgement (`OK` or `{"reply":""}`) |
-| `workers/dashboard/src/index.ts` | Access JWT check, then the page or `/api/*`; nonce CSP |
-| `workers/dashboard/src/data.ts` | `/api/numbers`, `/api/stats`, `/api/messages` (whitelisted sorts, filters, keyset `cursor`, `since` sync) |
-| `workers/dashboard/src/page.ts` | Entire UI: CSS, HTML and browser JS in `String.raw` templates |
-| `shared/validation.ts` | `Env`, phone normalization, body reading, cursors |
-| `migrations/0001_initial.sql` | Schema |
-| `tests/workers.test.ts` | Miniflare D1 tests for ingest, auth isolation and table queries |
-| `scripts/preview.ts` | Local UI preview with seeded data and live inserts (`npm run preview`, port 8791) |
+| `workers/dashboard/src/index.ts` | Access JWT check, then `handle()`: user lookup, same-origin check for POSTs, routing; nonce CSP |
+| `workers/dashboard/src/users.ts` | `loadUser`, numbers per user, 24-hour send usage, `/api/me`, preferences, `audit()` |
+| `workers/dashboard/src/data.ts` | `/api/stats`, `/api/messages` (whitelisted sorts, filters, keyset `cursor`, `since` sync), scoped by role |
+| `workers/dashboard/src/admin.ts` | `/api/admin/*`: users, numbers, settings, opt-outs, activity log |
+| `workers/dashboard/src/send.ts` | `/api/send`: permission and limit checks, idempotent send ID, Micropay call, per-recipient rows |
+| `workers/dashboard/src/ui.ts` | Shared CSS, header, icons and browser helpers; the no-access page |
+| `workers/dashboard/src/page.ts` | Messages page and compose panel (including the CSV/Excel reader) |
+| `workers/dashboard/src/admin-page.ts` | Admin page |
+| `shared/validation.ts` | `Env`, phone and recipient normalization, body reading, cursors |
+| `shared/settings.ts` | Settings defaults and validation, opt-out word matching (also used by ingest) |
+| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log |
+| `tests/workers.test.ts` | Miniflare D1 tests: ingest, isolation, table queries, access, admin, sending (fake Micropay) |
+| `scripts/preview.ts` | Local preview with seeded data, live inserts and a fake Micropay (`npm run preview`; `PREVIEW_USER=agent@example.com` for a regular user) |
 
 ## Decisions and their reasons
 
@@ -51,14 +56,18 @@ The README documents setup, routes, field mapping and operations in detail.
 - **Sorting is server-side with per-sort keyset cursors.** Live sync merges rows changed since the last sync. Rows that sort past the last loaded page wait for "load more", and the status filter is re-applied in the browser because a status change can move a row out of it.
 - **Polling every 5 s (30 s in background tabs).** That is about 12 small D1 queries a minute per open tab.
 - **Real config values stay local** because the repo is public and the README forbids committing them.
+- **No separate admin password.** Admins sign in like everyone else; the role lives in `users`. Removing a user or a role takes effect on the next request.
+- **Send rights are per number**; bulk sending and a rolling 24-hour recipient limit are per user. Admins have no daily limit.
+- **A send is never repeated.** The browser's UUID is claimed in `sends` before Micropay is called; timeouts become `unknown` and are not retried. A rejected send gets a new ID in the browser so the user can fix and resend.
+- **Opt-outs** come from replies that are exactly an opt-out word (checked in ingest) and from admins. Micropay's own removal service doesn't reach this system.
 
 ## Working on the UI
 
-- `page.ts` is three `String.raw` templates. Inside them, never use backticks or `${`. Backslashes are kept literally, but the current code avoids them anyway.
+- `ui.ts`, `page.ts` and `admin-page.ts` hold CSS, HTML and browser JS in `String.raw` templates. Inside them, never use backticks or `${`. Backslashes are kept literally.
 - The CSP allows only nonce'd `<script>`/`<style>`. Don't use `style="…"` attributes, external fonts or images. Setting styles through JS (`el.style.x`) and inline SVG markup are fine.
 - Render untrusted text only with `textContent` or `append(string)`. `icon()` uses `innerHTML` with constant SVG strings only.
-- To check the browser script's syntax, extract it from `page('n')` and run `node --check`.
-- To see the UI: `npm run preview`, then open http://localhost:8791. The deployed dashboard can't be used locally because of Access. The preview depends on `vite-node`, which vitest installs.
+- To check browser script syntax, extract the `<script>` from `page('n')` and `adminPage('n')` and run `node --check`.
+- To see the UI: `npm run preview`, then open http://localhost:8791 (signed in as a sample admin). The deployed dashboard can't be used locally because of Access. The preview depends on `vite-node`, which vitest installs.
 
 ## Commands
 
@@ -77,10 +86,21 @@ npx wrangler d1 execute sms-dashboard --remote --config workers/ingest/wrangler.
 - **Data collection** stores replies inside Micropay (report or Excel export). Its docs describe no forwarding to a URL.
 - **Automations** can be triggered by an incoming SMS to a number and can include an HTTP request step that calls an external URL. This is the way to combine Micropay logic with this dashboard. The step's payload format is not publicly documented. The Micropay route needs `origsms`, `phone`, `dest` and `msgid`; if the step has no unique message ID, the endpoint must be adapted. A generated ID would lose retry deduplication.
 
+## Rollout of users, admin and sending
+
+Order matters: the migration must exist before code that uses it, and the Access policy may only be opened after the user allowlist is live.
+
+1. Apply `0002`: `npm run db:migrate`. Existing assigned emails become regular users.
+2. Make the owner an admin with the SQL in the README setup section.
+3. The owner creates a Micropay API token with SMS permissions and runs `npx wrangler secret put MICROPAY_TOKEN --config workers/dashboard/wrangler.jsonc`.
+4. Deploy ingest (opt-out detection), then the dashboard.
+5. In Zero Trust, change the dashboard Access policy to admit any email that completes One-time PIN, so users added on the admin page can sign in.
+6. Send one test message to the owner's own phone and confirm the sender format Micropay accepts.
+
 ## Open items
 
 1. The owner is asking Micropay support two questions: can one incoming SMS trigger both an automation and a Dynamic Text service? And with keywords assigned, which service receives messages that match no keyword?
 2. If an automation HTTP step is used, get a screenshot of its fields and map them to the Micropay route (or add a route for its format).
-3. Wire the sending workflow to `POST /events/outgoing` with `OUTGOING_TOKEN` (format in the README).
+3. Messages sent from the dashboard are logged automatically. Any other sending system still needs to `POST /events/outgoing` with `OUTGOING_TOKEN` (format in the README).
 4. Retention, backups and monitoring of ingestion failures are not configured (see the README).
 5. An unused Access application from an earlier domain attempt remains in a different Cloudflare account. It's harmless and the owner can delete it.

@@ -1,6 +1,6 @@
 # Micropay SMS dashboard
 
-Read-only Hebrew RTL dashboard. Two Cloudflare Workers share one D1 database. No SMS sending or delivery-report processing is included. Existing delivery-report integrations must remain unchanged.
+Hebrew RTL dashboard of SMS traffic, with manual sending by users an admin has authorized. Two Cloudflare Workers share one D1 database. Nothing is sent automatically, and no delivery-report processing is included. Existing delivery-report integrations must remain unchanged.
 
 ## Documentation basis and status
 
@@ -24,11 +24,11 @@ cp workers/dashboard/wrangler.jsonc.example workers/dashboard/wrangler.jsonc
 cp workers/ingest/wrangler.jsonc.example workers/ingest/wrangler.jsonc
 ```
 
-The copied wrangler.jsonc files are git-ignored because they hold account-specific values; only the .example files are committed. Replace REPLACE_WITH_D1_DATABASE_ID in both with the same database ID, then run npm run db:migrate. The other REPLACE_WITH values (Access settings and custom-domain hostnames) are covered below. Register normalized international system numbers and lowercase, trimmed user emails through D1 SQL. Multiple numbers per user and explicitly shared numbers are supported.
+The copied wrangler.jsonc files are git-ignored because they hold account-specific values; only the .example files are committed. Replace REPLACE_WITH_D1_DATABASE_ID in both with the same database ID, then run npm run db:migrate. The other REPLACE_WITH values (Access settings and custom-domain hostnames) are covered below. Create the first admin and the first system number through D1 SQL; everything after that is managed on the dashboard's admin page. Emails are lowercase and trimmed; numbers are international.
 
 ```sql
+INSERT INTO users(email,name,role,created_at) VALUES ('owner@example.com','Owner','admin',0) ON CONFLICT(email) DO UPDATE SET role='admin',active=1;
 INSERT INTO system_numbers(number,label) VALUES ('+972501234567','Office');
-INSERT INTO user_numbers(email,system_number) VALUES ('alice@example.com','+972501234567');
 ```
 
 ## Ingestion secrets
@@ -83,13 +83,35 @@ Outgoing logs additionally require submission_status: pending, accepted, rejecte
 
 shared/micropay-submission.ts interprets an existing scheduleSms response without issuing any API call. It checks message=OK AND numeric status=1 for JSON, recognizes documented plain OK/validate variants, and treats ambiguous responses as unknown. ERROR denotes rejection. task_id is a campaign ID, NOT an individual message ID: retain it in the sending workflow's metadata, not provider_message_id. Status=1 alone is insufficient, and queue acceptance is not delivery. Log every concrete recipient/body separately for batches or listjson; a campaign acknowledgement does not enumerate recipients, pool membership, or personalized bodies.
 
+When an incoming message is exactly one of the opt-out words in the settings (default הסר, הסרה, STOP, UNSUBSCRIBE; case, spaces and surrounding punctuation are ignored), the sender is added to the opt-out list. A failure of this step is logged and never fails the ingestion.
+
 Deploy the configured ingestion Worker with npm run deploy:ingest. Do not change delivery-report URLs, add DLR ingestion, or automatically send SMS.
 
 ## Dashboard and operations
 
-Set ACCESS_ISSUER to https://YOUR-TEAM.cloudflareaccess.com and ACCESS_AUD to your Access application's audience. Set the dashboard hostname in routes, protect it with an Access application and an explicit user policy, then deploy using npm run deploy:dashboard. Dashboard workers.dev and preview URLs stay disabled. Every request verifies the JWT issuer, audience, signature and expiry; email headers and query parameters are not identities. Every message query enforces D1 assignments.
+Set ACCESS_ISSUER to https://YOUR-TEAM.cloudflareaccess.com and ACCESS_AUD to your Access application's audience. Set the dashboard hostname in routes, protect it with an Access application and an explicit user policy, then deploy using npm run deploy:dashboard. Dashboard workers.dev and preview URLs stay disabled. Every request verifies the JWT issuer, audience, signature and expiry; email headers and query parameters are not identities. The verified email must then belong to an active row in users, otherwise the dashboard shows a no-access page. Because the users table is the allowlist, the Access policy may admit any email that completes its login (for example One-time PIN for everyone); adding or removing a user on the admin page then takes effect immediately. Every message query enforces D1 assignments; admins see every active number.
 
 The UI is a table of messages, 100 per page with more loaded on scroll. Columns sort server-side (time, direction, customer, system number, submission status) with keyset cursors. Filters cover text search, direction, system number, submission status, date range and a single customer (click a customer number), and the filter state is kept in the page URL. Summary counts come from /api/stats for the same filter. Visible tabs poll every 5 seconds, background tabs every 30 seconds, without overlapping requests; updated-time/ID cursors pick up new messages and status changes. Each open tab therefore makes about 12 small D1 queries a minute. textContent rendering, nonce CSP and no-store responses are retained. Display timezone and date-filter day boundaries are Asia/Jerusalem.
+
+## Users, roles and the admin page
+
+Admins (role admin) open /admin to manage users, system numbers, the opt-out list, settings and the activity log. Each user has a name, an active flag and, per system number, view or view-and-send access. Two more permissions apply to non-admins: sending to more than one recipient or from a file (can_bulk_send), and a limit on recipients per rolling 24 hours (daily_limit, or the default from settings). Admins see and may send from every active number without a daily limit. The system refuses to delete or demote the last active admin, and admins cannot remove their own rights. Every change and every send is written to audit_log.
+
+Settings: organization name, default row spacing, live refresh interval (3 to 60 seconds), maximum recipients per send (up to 5,000), default daily limit, opt-out words, opt-out text appended to sends with more than one recipient, and whether non-Israeli recipients are allowed (off by default).
+
+## Sending messages
+
+Set the Micropay API token (created under account and sub-admin management, API tokens, with SMS permissions) as a dashboard secret. Without it, sending answers 503.
+
+```sh
+npx wrangler secret put MICROPAY_TOKEN --config workers/dashboard/wrangler.jsonc
+```
+
+POST /api/send takes {id, system_number, recipients, body}. The client generates the UUID id when the compose panel opens; the server claims it in the sends table before calling Micropay, so a retried or repeated request returns the earlier result and never sends twice. The server re-checks everything: send access to the number, bulk permission, maximum recipients, the 24-hour limit, valid and (unless allowed) Israeli numbers, duplicates, and the opt-out list. It then calls scheduleSms.php once with the system number as sender and the recipients in local format, interprets the answer with shared/micropay-submission.ts, and writes one outgoing message per recipient with sent_by and send_id. A timeout or unclear answer is recorded as unknown and never retried automatically. Accepted means Micropay queued the campaign, not that it was delivered. Writes to the dashboard (POST) must come from its own origin with a JSON body.
+
+The compose panel accepts numbers separated by commas or new lines, or a CSV, TXT or Excel .xlsx file (first worksheet; the column with the most phone numbers is chosen and can be changed). Numbers that lost their leading zero in Excel are repaired. It shows recipients, invalid entries, characters and billed SMS (70 Hebrew characters for one SMS, 67 per part after that), and asks for a second confirmation before sending.
+
+## Production checklist and backups
 
 Before production, run CI, resolve dependencies and commit a package-lock.json, verify Access failures on every hostname, instrument all outgoing workflows, define retention, monitor ingestion failures and D1/Workers quotas, and schedule protected exports with restoration tests. Manual/uninstrumented outgoing messages and historical imports remain absent.
 

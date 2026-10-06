@@ -1,5 +1,6 @@
 import {Env, HttpError, failure, json, phone, readBody, text, timestamp} from '../../../shared/validation';
 import {readMicropay, micropayAcknowledgement} from './micropay';
+import {DEFAULT_SETTINGS, isOptOut} from '../../../shared/settings';
 async function equal(a: string, b: string): Promise<boolean> { const hash = async (s: string) => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))); const [x,y] = await Promise.all([hash(a),hash(b)]); let difference = 0; for (let i=0;i<x.length;i++) difference |= x[i] ^ y[i]; return difference === 0; }
 // Micropay can only be configured with a URL, so its route also accepts ?token=.
 async function authorize(request: Request, expected: string | undefined, allowQuery = false): Promise<void> {
@@ -22,7 +23,15 @@ async function store(direction: 'in'|'out', body: Record<string, unknown>, env: 
  if (!stored) throw new Error('Persistence failed');
  if (stored.system_number !== system || stored.peer_number !== peer || stored.body !== message) throw new HttpError(409, 'Event ID reused with different message content');
  if (direction === 'out' && status !== stored.submission_status && status !== 'pending' && status !== 'unknown') throw new HttpError(409, 'Conflicting final submission status');
+ if (direction === 'in' && message.length <= 30) await optOut(env, peer, message);
  return {ok:true,id:stored.id,deduplicated_by_id:body.event_id !== undefined,submission_status:stored.submission_status};
+}
+// A customer who replies with an opt-out word is skipped by future dashboard sends. Never fails the ingestion itself:
+// the message is already stored, and an error here must not make Micropay send the customer an error SMS.
+async function optOut(env: Env, peer: string, message: string): Promise<void> {
+ try { const row = await env.DB.prepare("SELECT value FROM settings WHERE key='optout_keywords'").first<{value:string}>(); const keywords = row ? JSON.parse(row.value) as string[] : DEFAULT_SETTINGS.optout_keywords;
+  if (isOptOut(message, keywords)) await env.DB.prepare("INSERT INTO opt_outs (number,source,created_at) VALUES (?,'keyword',?) ON CONFLICT(number) DO NOTHING").bind(peer, Date.now()).run(); }
+ catch (error) { console.error('Opt-out check failed', error instanceof Error ? error.message : error); }
 }
 export async function ingest(request: Request, env: Env): Promise<Response> {
  const path = new URL(request.url).pathname;
