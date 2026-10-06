@@ -11,3 +11,6 @@ backups/
 
 # Real Worker configs hold account-specific values; copy them from wrangler.jsonc.example
 workers/*/wrangler.jsonc
+
+# macOS Finder metadata
+.DS_Store
