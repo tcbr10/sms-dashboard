@@ -40,8 +40,8 @@ tr.open .body{display:block;overflow:visible}
 .tag.test{margin-inline-start:6px}
 .details{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);font-size:12.5px;color:var(--ink2);cursor:auto}
 .details b{margin-inline-end:6px;font-weight:600;color:var(--muted)}
-.actions{display:flex;gap:6px;margin-inline-start:auto}
-.act{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--field);font-size:12.5px;cursor:pointer}
+.actions{display:flex;flex-wrap:wrap;gap:6px;margin-inline-start:auto}
+.act{display:inline-flex;flex:none;align-items:center;gap:6px;height:30px;white-space:nowrap;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--field);font-size:12.5px;cursor:pointer}
 .act:hover{border-color:var(--accent)}
 [data-density=dense] .day,[data-density=dense] .clock{display:inline}[data-density=dense] .clock{margin-inline-start:6px}[data-density=dense] .num-sub{display:none}[data-density=dense] .dir{padding-block:0}
 .more-row{display:flex;justify-content:center;padding:14px}
@@ -146,6 +146,13 @@ const body = header('messages',true) + String.raw`
   <div class="dialog-foot"><button type="button" class="ghost danger" id="le-delete">מחיקת הרשימה</button><span class="end"></span><button type="button" class="ghost" id="le-back">חזרה לרשימות</button><button type="submit" class="btn" id="le-save">שמירה</button></div>
  </form>
 </div></dialog>
+<dialog id="ce-dlg" aria-labelledby="ce-title"><form class="dialog-body" id="ce-form" novalidate>
+ <div class="dialog-head"><h2 id="ce-title">פרטי לקוח</h2><button type="button" class="icon-btn" id="ce-close" aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <p class="hint"><span class="phone" id="ce-number"></span> · הפרטים משותפים לכל המשתמשים</p>
+ <div class="grid2" id="ce-fields"></div>
+ <div class="banner" id="ce-error" role="alert" hidden></div>
+ <div class="dialog-foot"><span class="end"></span><button type="button" class="ghost" id="ce-cancel">ביטול</button><button type="submit" class="btn" id="ce-save">שמירה</button></div>
+</form></dialog>
 <dialog id="filter-dlg" aria-labelledby="fd-title"><div class="dialog-body">
  <div class="dialog-head"><h2 id="fd-title">סינון ומיון</h2><button type="button" class="icon-btn" id="fd-close" aria-label="סגירה">`+svg('close')+String.raw`</button></div>
  <label class="fld"><span>מיון</span><select id="fd-sort"></select></label>
@@ -156,11 +163,11 @@ const body = header('messages',true) + String.raw`
 const script = String.raw`
 const STATUS={pending:['בתהליך','warn','clock','ההגשה בתהליך'],accepted:['התקבלה','good','check','ההגשה התקבלה אצל הספק. זה אינו אישור מסירה'],rejected:['נדחתה','bad','x','ההגשה נדחתה'],unknown:['לא ידוע','neutral','question','תוצאת ההגשה לא ידועה']};
 const DIR={in:'נכנסת',out:'יוצאת'};
-const RANGES=[['','הכל'],['today','היום'],['7','7 ימים'],['30','30 ימים'],['custom','טווח']];
-const DATE=/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
+const RANGES=[['','הכל'],['1h','שעה אחרונה'],['24h','24 שעות'],['today','היום'],['7','7 ימים'],['30','30 ימים'],['custom','טווח']];
+const DATE=/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,TIME=/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/;
 const state={q:'',peer:'',sort:'time',order:'desc'};
-// Column filters: a date range, value sets (direction, status, system number) and "contains" text keyed by query parameter.
-const F={range:'',from:'',to:'',dir:[],status:[],num:[],text:{}};
+// Column filters: a date range with optional times, value sets (direction, status, system number) and "contains" text keyed by query parameter.
+const F={range:'',from:'',to:'',fromTime:'',toTime:'',dir:[],status:[],num:[],text:{}};
 let COLS=[],visible=[];
 const rows=new Map(),cache=new Map(),fresh=new Set(),expanded=new Set(),labels=new Map();
 let next=null,sync=null,boundary=null,maxId=null,total=null,gen=0,loading=false,polling=false,paging=false,stopped=false,fails=0,unseen=0,timer=0,debounce=0,saveTimer=0,noNumbers=false;
@@ -183,18 +190,21 @@ function pick(v,allowed){return (v||'').split(',').filter(function(x){return all
 function textParams(){return COLS.filter(function(c){return c.filter==='text';}).map(function(c){return c.param;});}
 function readUrl(){const p=new URLSearchParams(location.search);state.q=(p.get('q')||'').slice(0,200);state.peer=normalize(p.get('peer')||'')||'';
  const s=p.get('sort');state.sort=COLS.some(function(c){return c.sort&&c.sort===s;})?s:'time';const o=p.get('order');state.order=o==='asc'||o==='desc'?o:'desc';
- F.range=['today','7','30','custom'].includes(p.get('range'))?p.get('range'):'';F.from=DATE.test(p.get('from')||'')?p.get('from'):'';F.to=DATE.test(p.get('to')||'')?p.get('to'):'';
+ F.range=RANGES.some(function(r){return r[0]&&r[0]===p.get('range');})?p.get('range'):'';F.from=DATE.test(p.get('from')||'')?p.get('from'):'';F.to=DATE.test(p.get('to')||'')?p.get('to'):'';
+ F.fromTime=TIME.test(p.get('from_t')||'')?p.get('from_t'):'';F.toTime=TIME.test(p.get('to_t')||'')?p.get('to_t'):'';
  F.dir=pick(p.get('dir'),['in','out']);F.status=pick(p.get('status'),Object.keys(STATUS));F.num=pick(p.get('num'),ME.numbers.map(function(n){return n.number;}));
  F.text={};for(const k of textParams()){const v=p.get(k);if(v)F.text[k]=v.slice(0,200);}}
 function writeUrl(){const p=new URLSearchParams();if(state.q)p.set('q',state.q);if(state.peer)p.set('peer',state.peer);if(state.sort!=='time'||state.order!=='desc'){p.set('sort',state.sort);p.set('order',state.order);}
- if(F.range){p.set('range',F.range);if(F.range==='custom'){if(F.from)p.set('from',F.from);if(F.to)p.set('to',F.to);}}
+ if(F.range){p.set('range',F.range);if(F.range==='custom'){if(F.from)p.set('from',F.from);if(F.fromTime)p.set('from_t',F.fromTime);if(F.to)p.set('to',F.to);if(F.toTime)p.set('to_t',F.toTime);}}
  if(F.dir.length)p.set('dir',F.dir.join(','));if(F.status.length)p.set('status',F.status.join(','));if(F.num.length)p.set('num',F.num.join(','));for(const k in F.text)p.set(k,F.text[k]);
  const s=p.toString();history.replaceState(null,'',s?'?'+s:location.pathname);}
 function active(c){if(!c.filter)return false;if(c.filter==='date')return !!F.range;if(c.filter==='set')return F[c.key].length>0;return !!F.text[c.param];}
-function clearColumn(c){if(c.filter==='date'){F.range='';F.from='';F.to='';}else if(c.filter==='set')F[c.key]=[];else delete F.text[c.param];}
+function clearRange(){F.range='';F.from='';F.to='';F.fromTime='';F.toTime='';}
+function clearColumn(c){if(c.filter==='date')clearRange();else if(c.filter==='set')F[c.key]=[];else delete F.text[c.param];}
 function filtered(){return !!(state.q||state.peer)||COLS.some(active);}
-function bounds(){const t=today();if(F.range==='today')return [midnight(t)];if(F.range==='7'||F.range==='30')return [midnight(shift(t,1-Number(F.range)))];
- if(F.range==='custom')return [F.from?midnight(F.from):undefined,F.to?midnight(shift(F.to,1)):undefined];return [];}
+// A time without a date means today. The end time includes its whole minute; an end date without a time includes the whole day.
+function bounds(){const t=today();if(F.range==='1h'||F.range==='24h')return [Date.now()-(F.range==='1h'?3600000:86400000)];if(F.range==='today')return [midnight(t)];if(F.range==='7'||F.range==='30')return [midnight(shift(t,1-Number(F.range)))];
+ if(F.range==='custom'){const from=F.from||(F.fromTime?t:''),to=F.to||(F.toTime?t:'');return [from?israelTime(from,F.fromTime):undefined,to?(F.toTime?israelTime(to,F.toTime)+60000:midnight(shift(to,1))):undefined];}return [];}
 function query(withStatus){const p=new URLSearchParams();if(F.num.length)p.set('system_number',F.num.join(','));if(state.peer)p.set('peer_number',state.peer);if(state.q)p.set('q',state.q);
  if(F.dir.length)p.set('direction',F.dir.join(','));if(F.status.length&&withStatus)p.set('status',F.status.join(','));for(const k in F.text)p.set(k,F.text[k]);
  const b=bounds();if(b[0]!==undefined)p.set('from',String(b[0]));if(b[1]!==undefined)p.set('to',String(b[1]));p.set('sort',state.sort);p.set('order',state.order);p.set('limit','100');return p;}
@@ -267,7 +277,7 @@ function build(m,open,now){const tr=el('tr',m.direction+(open?' open':''));tr.ta
  if(open){const det=el('div','details');det.append(fact('נקלטה',fullFmt.format(m.received_at)));if(m.time_source==='receipt')det.append(fact('זמן ההודעה','לפי זמן הקליטה'));
   for(const f of ME.contact_fields)if(m.contact&&m.contact[f.id])det.append(fact(f.label,m.contact[f.id]));
   if(m.sent_by)det.append(fact('נשלחה על ידי',m.sent_by));if(m.provider_message_id)det.append(fact('מזהה ספק',m.provider_message_id));
-  const acts=el('div','actions');if(canSend(m.system_number))acts.append(act('reply','השב'));acts.append(act('copy','העתקת הטקסט'),act('chat','כל השיחה'));det.append(acts);
+  const acts=el('div','actions');if(canSend(m.system_number))acts.append(act('reply','השב'));if(ME.can_edit_contacts&&ME.contact_fields.length)acts.append(act('edit','עריכת פרטים'));acts.append(act('copy','העתקת הטקסט'),act('chat','כל השיחה'));det.append(acts);
   (tr.querySelector('.c-msg')||tr.lastChild).append(det);}
  return tr;}
 function cell(c,m,now){const td=el('td',c.cls);td.dataset.label=c.label;
@@ -288,15 +298,18 @@ function columnMenu(c,th){popover(th,function(m){m.setAttribute('aria-label',c.l
  if(c.sort){m.append(el('div','menu-title','מיון'));for(const o of [['asc','מיון עולה'],['desc','מיון יורד']]){const b=el('button','opt');b.type='button';b.setAttribute('role','menuitemradio');b.setAttribute('aria-checked',String(state.sort===c.sort&&state.order===o[0]));b.append(icon(o[0]),o[1]);b.addEventListener('click',function(){state.sort=c.sort;state.order=o[0];closeMenu();load();});m.append(b);}}
  if(c.filter){if(c.sort)m.append(el('hr'));m.append(el('div','menu-title','סינון'),filterControl(c,load));const clear=el('button','ghost','ניקוי הסינון בעמודה');clear.type='button';clear.disabled=!active(c);clear.addEventListener('click',function(){clearColumn(c);closeMenu();load();});m.append(clear);}});}
 function filterControl(c,changed){const box=el('div','check-list');
- if(c.filter==='date'){const pre=el('div','presets');const custom=el('div','row');const from=el('input'),to=el('input');from.type=to.type='date';from.value=F.from;to.value=F.to;from.setAttribute('aria-label','מתאריך');to.setAttribute('aria-label','עד תאריך');custom.append(from,'–',to);custom.hidden=F.range!=='custom';
-  for(const r of RANGES){const b=el('button','',r[1]);b.type='button';b.setAttribute('aria-pressed',String(F.range===r[0]));b.addEventListener('click',function(){F.range=r[0];if(r[0]!=='custom'){F.from='';F.to='';from.value='';to.value='';}for(const x of pre.children)x.setAttribute('aria-pressed',String(x===b));custom.hidden=r[0]!=='custom';changed();});pre.append(b);}
-  for(const inp of [from,to])inp.addEventListener('change',function(){F.from=DATE.test(from.value)?from.value:'';F.to=DATE.test(to.value)?to.value:'';changed();});
+ if(c.filter==='date'){const pre=el('div','presets');const custom=el('div','range');const from=el('input'),to=el('input'),fromT=el('input'),toT=el('input');from.type=to.type='date';fromT.type=toT.type='time';
+  from.value=F.from;to.value=F.to;fromT.value=F.fromTime;toT.value=F.toTime;from.setAttribute('aria-label','מתאריך');fromT.setAttribute('aria-label','משעה');to.setAttribute('aria-label','עד תאריך');toT.setAttribute('aria-label','עד שעה');
+  custom.append(el('span','hint','מ־'),from,fromT,el('span','hint','עד'),to,toT);custom.hidden=F.range!=='custom';
+  for(const r of RANGES){const b=el('button','',r[1]);b.type='button';b.setAttribute('aria-pressed',String(F.range===r[0]));b.addEventListener('click',function(){clearRange();F.range=r[0];for(const x of [from,to,fromT,toT])x.value='';for(const x of pre.children)x.setAttribute('aria-pressed',String(x===b));custom.hidden=r[0]!=='custom';changed();});pre.append(b);}
+  for(const inp of [from,to,fromT,toT])inp.addEventListener('change',function(){F.from=DATE.test(from.value)?from.value:'';F.to=DATE.test(to.value)?to.value:'';F.fromTime=TIME.test(fromT.value)?fromT.value:'';F.toTime=TIME.test(toT.value)?toT.value:'';changed();});
   box.append(pre,custom);return box;}
  if(c.filter==='set'){for(const o of c.options){const l=el('label','check');const cb=el('input');cb.type='checkbox';cb.checked=F[c.key].includes(o[0]);cb.addEventListener('change',function(){F[c.key]=cb.checked?F[c.key].concat([o[0]]):F[c.key].filter(function(x){return x!==o[0];});changed();});l.append(cb,o[1]);box.append(l);}return box;}
  const inp=el('input');inp.type='search';inp.placeholder='מכיל…';inp.value=F.text[c.param]||'';inp.setAttribute('aria-label',c.label+' מכיל');let t=0;
  const apply=function(){clearTimeout(t);const v=inp.value.trim();if((F.text[c.param]||'')===v)return;if(v)F.text[c.param]=v;else delete F.text[c.param];changed();};
  inp.addEventListener('input',function(){clearTimeout(t);t=setTimeout(apply,400);});inp.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();apply();}});box.append(inp);return box;}
-function chipLabel(c){if(c.filter==='date')return c.label+': '+(F.range==='custom'?(F.from||'…')+' – '+(F.to||'…'):RANGES.find(function(r){return r[0]===F.range;})[1]);
+function rangeEnd(day,time){return (day?day.split('-').reverse().join('.'):time?'היום':'…')+(time?' '+time:'');}
+function chipLabel(c){if(c.filter==='date')return c.label+': '+(F.range==='custom'?rangeEnd(F.from,F.fromTime)+' – '+rangeEnd(F.to,F.toTime):RANGES.find(function(r){return r[0]===F.range;})[1]);
  if(c.filter==='set')return c.label+': '+c.options.filter(function(o){return F[c.key].includes(o[0]);}).map(function(o){return o[1];}).join(', ');return c.label+' מכיל: '+F.text[c.param];}
 function chip(parts,onRemove){const c=el('span','chip');for(const p of parts)c.append(p);const x=el('button');x.type='button';x.title=x.ariaLabel='הסרת הסינון';x.setAttribute('aria-label','הסרת הסינון');x.append(icon('close'));x.addEventListener('click',onRemove);c.append(x);return c;}
 function renderChips(){const chips=$('chips');chips.replaceChildren();
@@ -304,7 +317,7 @@ function renderChips(){const chips=$('chips');chips.replaceChildren();
  if(state.q)chips.append(chip(['חיפוש: '+state.q],function(){state.q='';$('q').value='';load();}));
  for(const c of COLS)if(active(c))chips.append(chip([chipLabel(c)],function(){clearColumn(c);load();}));
  if(filtered()){const b=el('button','ghost','ניקוי כל הסינונים');b.type='button';b.addEventListener('click',clearAll);chips.append(b);}}
-function clearAll(){state.q='';state.peer='';F.range='';F.from='';F.to='';F.dir=[];F.status=[];F.num=[];F.text={};$('q').value='';closeMenu();load();}
+function clearAll(){state.q='';state.peer='';clearRange();F.dir=[];F.status=[];F.num=[];F.text={};$('q').value='';closeMenu();load();}
 function openPeer(n){state.peer=n;if(state.sort==='peer'){state.sort='time';state.order='desc';}load();}
 function toggle(id){if(expanded.has(id))expanded.delete(id);else expanded.add(id);render();const c=cache.get(id);if(c&&document.activeElement!==c.tr)c.tr.focus({preventScroll:true});}
 function copy(text){if(!navigator.clipboard){toast('ההעתקה אינה נתמכת בדפדפן זה');return;}navigator.clipboard.writeText(text).then(function(){toast('הטקסט הועתק');},function(){toast('ההעתקה נכשלה');});}
@@ -329,11 +342,24 @@ $('more').addEventListener('click',more);
 if('IntersectionObserver' in window)new IntersectionObserver(function(es){if(es.some(function(x){return x.isIntersecting;}))more();},{rootMargin:'200px'}).observe($('more-row'));
 $('rows').addEventListener('click',function(e){const t=e.target;const pb=t.closest('button.peer');if(pb){openPeer(pb.dataset.peer);return;}
  const tr=t.closest('tr');const m=tr&&rows.get(Number(tr.dataset.id));if(!m)return;const a=t.closest('button[data-act]');
- if(a){if(a.dataset.act==='copy')copy(m.body);else if(a.dataset.act==='reply')openCompose(m.system_number,m.peer_number);else openPeer(m.peer_number);return;}
+ if(a){if(a.dataset.act==='copy')copy(m.body);else if(a.dataset.act==='reply')openCompose(m.system_number,m.peer_number);else if(a.dataset.act==='edit')openContact(m);else openPeer(m.peer_number);return;}
  if(t.closest('.details')||String(getSelection()).length)return;toggle(m.id);});
 $('rows').addEventListener('keydown',function(e){if(e.target.tagName==='TR'&&(e.key==='Enter'||e.key===' ')){e.preventDefault();toggle(Number(e.target.dataset.id));}});
 document.addEventListener('keydown',function(e){const tag=document.activeElement&&document.activeElement.tagName;if(e.key==='/'&&tag!=='INPUT'&&tag!=='SELECT'&&tag!=='TEXTAREA'){e.preventDefault();$('q').focus();}});
 document.addEventListener('visibilitychange',function(){if(document.hidden)return;unseen=0;title();clearTimeout(timer);tick().finally(schedule);});
+
+// Contact details, shared by everyone. Only changed fields are sent, so concurrent edits of different fields both survive.
+let CE=null;
+const CONTACT_ERRORS={'You may not edit contact details':'אין לך הרשאה לערוך פרטי לקוחות.','This number is not in your messages':'אפשר לערוך רק לקוחות שמופיעים בהודעות של המספרים שלך.'};
+function openContact(m){CE={number:m.peer_number,orig:Object.assign({},m.contact||{})};$('ce-number').textContent=local(m.peer_number);const box=$('ce-fields');box.replaceChildren();
+ for(const f of ME.contact_fields){const l=el('label','fld');const inp=el('input');inp.maxLength=200;inp.dataset.field=f.id;inp.value=CE.orig[f.id]||'';l.append(el('span','',f.label),inp);box.append(l);}
+ $('ce-error').hidden=true;$('ce-save').disabled=false;$('ce-dlg').showModal();const first=box.querySelector('input');if(first)first.focus();}
+$('ce-form').addEventListener('submit',async function(e){e.preventDefault();if(!CE)return;const data={};
+ for(const inp of $('ce-fields').querySelectorAll('input')){const v=inp.value.trim();if(v!==(CE.orig[inp.dataset.field]||''))data[inp.dataset.field]=v;}
+ if(!Object.keys(data).length){$('ce-dlg').close();return;}$('ce-save').disabled=true;$('ce-error').hidden=true;
+ try{const d=await post('/api/contacts/save',{number:CE.number,data:data});for(const m of rows.values())if(m.peer_number===d.number)m.contact=d.data;$('ce-dlg').close();toast('פרטי הלקוח נשמרו');render();}
+ catch(err){$('ce-error').hidden=false;$('ce-error').textContent=CONTACT_ERRORS[err.message]||message(err);}finally{$('ce-save').disabled=false;}});
+for(const id of ['ce-close','ce-cancel'])$(id).addEventListener('click',function(){$('ce-dlg').close();});
 
 // Export: every message matching the current filters and sort, fetched page by page and turned into a file in the browser.
 let exportFormat='xlsx',exporting=false;

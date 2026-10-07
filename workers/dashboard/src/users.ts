@@ -1,10 +1,10 @@
 import {Env,HttpError,json,readBody,recipient} from '../../../shared/validation';
 import {loadSettings} from '../../../shared/settings';
-export type User = {email:string;name:string;role:'admin'|'user';can_bulk_send:number;daily_limit:number|null;density:string|null;columns:string|null;test_number:string|null;sessions_revoked_at:number|null};
+export type User = {email:string;name:string;role:'admin'|'user';can_bulk_send:number;daily_limit:number|null;density:string|null;columns:string|null;test_number:string|null;sessions_revoked_at:number|null;can_edit_contacts:number};
 export type Access = {number:string;label:string;can_send:number};
 const DAY = 86400000;
 // Only active users get in; Cloudflare Access proves the email, this table decides whether it may use the dashboard.
-export async function loadUser(env: Env, email: string): Promise<User|null> { return env.DB.prepare('SELECT email,name,role,can_bulk_send,daily_limit,density,columns,test_number,sessions_revoked_at FROM users WHERE email=? AND active=1').bind(email).first<User>(); }
+export async function loadUser(env: Env, email: string): Promise<User|null> { return env.DB.prepare('SELECT email,name,role,can_bulk_send,daily_limit,density,columns,test_number,sessions_revoked_at,can_edit_contacts FROM users WHERE email=? AND active=1').bind(email).first<User>(); }
 // Admins see and may send from every active number; users only from their assignments.
 export async function numbersFor(env: Env, user: User): Promise<Access[]> {
  const result = user.role === 'admin' ? await env.DB.prepare('SELECT number,label,1 AS can_send FROM system_numbers WHERE active=1 ORDER BY label,number').all<Access>() : await env.DB.prepare('SELECT s.number,s.label,u.can_send FROM system_numbers s JOIN user_numbers u ON u.system_number=s.number WHERE u.email=? AND s.active=1 ORDER BY s.label,s.number').bind(user.email).all<Access>();
@@ -17,7 +17,7 @@ export function touch(env: Env, email: string): Promise<unknown> { const now = D
 export async function me(env: Env, user: User): Promise<Response> {
  const [settings, numbers, sent] = await Promise.all([loadSettings(env.DB), numbersFor(env, user), sentLast24h(env, user.email)]);
  const admin = user.role === 'admin'; let columns: unknown = null; try { columns = user.columns ? JSON.parse(user.columns) : null; } catch { /* fall back to the default columns */ }
- return json({email:user.email,name:user.name,role:user.role,density:user.density ?? settings.default_density,columns,test_number:user.test_number,numbers,can_bulk_send:admin || !!user.can_bulk_send,daily_limit:admin ? null : user.daily_limit ?? settings.default_daily_limit,sent_24h:sent,contact_fields:settings.contact_fields,settings:{org_name:settings.org_name,refresh_seconds:settings.refresh_seconds,max_recipients:settings.max_recipients,optout_text:settings.optout_text,allow_international:settings.allow_international}});
+ return json({email:user.email,name:user.name,role:user.role,density:user.density ?? settings.default_density,columns,test_number:user.test_number,numbers,can_bulk_send:admin || !!user.can_bulk_send,can_edit_contacts:admin || !!user.can_edit_contacts,daily_limit:admin ? null : user.daily_limit ?? settings.default_daily_limit,sent_24h:sent,contact_fields:settings.contact_fields,settings:{org_name:settings.org_name,refresh_seconds:settings.refresh_seconds,max_recipients:settings.max_recipients,optout_text:settings.optout_text,allow_international:settings.allow_international}});
 }
 // Personal preferences: row spacing, visible columns and the user's own test number.
 export async function prefs(request: Request, env: Env, user: User): Promise<Response> {
@@ -28,3 +28,5 @@ export async function prefs(request: Request, env: Env, user: User): Promise<Res
  if (!sets.length) throw new HttpError(400,'Nothing to update');
  await env.DB.prepare('UPDATE users SET '+sets.join(',')+' WHERE email=?').bind(...values, user.email).run(); return json({ok:true});
 }
+// Signing out from the profile menu is logged here; the browser then goes to Cloudflare Access's logout, which ends this device's session only.
+export async function logout(env: Env, user: User): Promise<Response> { await audit(env, user.email, 'user.logout', null).run(); return json({ok:true}); }

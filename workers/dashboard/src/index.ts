@@ -2,7 +2,8 @@ import {Env,HttpError,failure} from '../../../shared/validation';
 import {Identity,identity} from './auth';
 import {data} from './data';
 import {page,adminPage,noAccessPage,sessionEndedPage} from './page';
-import {loadUser,me,prefs,touch} from './users';
+import {loadUser,logout,me,prefs,touch} from './users';
+import {saveContact} from './contacts';
 import {admin} from './admin';
 import {lists} from './lists';
 import {send,Fetcher} from './send';
@@ -21,6 +22,8 @@ export async function handle(request:Request,env:Env,who:string|Identity,options
  if (request.method==='POST') { sameOrigin(request);
   if (url.pathname==='/api/send') return send(request,env,user,options.fetcher??((input,init)=>fetch(input,init)));
   if (url.pathname==='/api/me/prefs') return prefs(request,env,user);
+  if (url.pathname==='/api/me/logout') return logout(env,user);
+  if (url.pathname==='/api/contacts/save') return saveContact(request,env,user);
   if (url.pathname.startsWith('/api/lists/')) return lists(request,url,env,user);
   if (url.pathname.startsWith('/api/admin/')) return admin(request,url,env,user);
   throw new HttpError(404,'Not found'); }

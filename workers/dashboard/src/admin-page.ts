@@ -25,7 +25,7 @@ const userDialog = String.raw`
  <div class="grid2"><label class="fld"><span>אימייל</span><input type="email" id="ud-email" class="phone" required maxlength="254" autocomplete="off"></label><label class="fld"><span>שם</span><input id="ud-name" maxlength="80"></label></div>
  <div class="grid2"><label class="fld"><span>תפקיד</span><select id="ud-role"><option value="user">משתמש</option><option value="admin">מנהל</option></select></label><label class="fld"><span>מגבלת נמענים ל-24 שעות</span><input type="number" id="ud-limit" min="0" max="100000" step="1"></label></div>
  <label class="fld"><span>מספר לבדיקה</span><input id="ud-test" class="phone" dir="ltr" maxlength="20" placeholder="לא הוגדר"></label>
- <div class="row"><label class="check"><input type="checkbox" id="ud-active">משתמש פעיל</label><label class="check"><input type="checkbox" id="ud-bulk">שליחה לכמה נמענים וייבוא מקובץ</label></div>
+ <div class="row"><label class="check"><input type="checkbox" id="ud-active">משתמש פעיל</label><label class="check"><input type="checkbox" id="ud-bulk">שליחה לכמה נמענים וייבוא מקובץ</label><label class="check"><input type="checkbox" id="ud-contacts">עריכת פרטי לקוחות</label></div>
  <div class="fld"><span class="label">גישה למספרים</span><p class="hint" id="ud-admin-note" hidden>למנהלים יש גישה מלאה לכל המספרים, ללא מגבלת שליחה.</p><div class="perm" id="ud-perms"></div></div>
  <p class="hint">המשתמש נכנס עם קוד חד-פעמי שנשלח לכתובת האימייל שלו.</p>
  <div class="banner" id="ud-error" role="alert" hidden></div>
@@ -100,7 +100,7 @@ const body = header('admin',false) + String.raw`
 `+userDialog;
 const script = String.raw`
 const TABS=['users','numbers','contacts','optouts','settings','audit'];
-const ACTIONS={'user.create':'משתמש נוסף','user.update':'משתמש עודכן','user.delete':'משתמש נמחק','number.create':'מספר נוסף','number.update':'מספר עודכן','settings.update':'ההגדרות עודכנו','optout.add':'נוספו לרשימת ההסרה','optout.remove':'הוסר מרשימת ההסרה','send':'שליחת הודעה','export':'ייצוא הודעות','user.disconnect':'ניתוק משתמש','contact.save':'איש קשר נשמר','contact.delete':'איש קשר נמחק','contacts.import':'ייבוא אנשי קשר','list.save':'רשימת תפוצה נשמרה','list.delete':'רשימת תפוצה נמחקה'};
+const ACTIONS={'user.create':'משתמש נוסף','user.update':'משתמש עודכן','user.delete':'משתמש נמחק','number.create':'מספר נוסף','number.update':'מספר עודכן','settings.update':'ההגדרות עודכנו','optout.add':'נוספו לרשימת ההסרה','optout.remove':'הוסר מרשימת ההסרה','send':'שליחת הודעה','export':'ייצוא הודעות','user.disconnect':'ניתוק משתמש','user.logout':'התנתקות','contact.save':'איש קשר נשמר','contact.delete':'איש קשר נמחק','contacts.import':'ייבוא אנשי קשר','list.save':'רשימת תפוצה נשמרה','list.delete':'רשימת תפוצה נמחקה'};
 const SEND_STATUS={accepted:'התקבלה',rejected:'נדחתה',unknown:'לא ידוע',sending:'בשליחה'};
 let USERS=[],NUMBERS=[],SETTINGS=null,OPTOUTS=[],CONTACTS=[],auditBefore=null,importRows=null,importMode='update';
 function error(e){$('error').hidden=false;$('error-text').textContent=message(e);}
@@ -126,14 +126,14 @@ function renderUsers(){const q=$('u-q').value.trim().toLowerCase();const body=$(
   tr.append(who,role,cell(admin?'כל המספרים':u.numbers.length?nf.format(u.numbers.length)+(sending?' · שליחה ב-'+nf.format(sending):' · צפייה בלבד'):'אין גישה',admin||u.numbers.length?'':'muted'),cell(admin||u.can_bulk_send?'כן':'לא'),cell(limit),cell(seen(u.last_seen_at),'muted'),status);body.append(tr);}
  if(!body.children.length){const tr=el('tr');const td=cell(q?'לא נמצאו משתמשים':'אין משתמשים','muted');td.colSpan=7;tr.append(td);body.append(tr);}}
 function openUser(email){const u=email?USERS.find(function(x){return x.email===email;}):null;$('ud-title').textContent=u?'עריכת משתמש':'משתמש חדש';
- $('ud-email').value=u?u.email:'';$('ud-email').readOnly=!!u;$('ud-name').value=u?u.name:'';$('ud-role').value=u?u.role:'user';$('ud-active').checked=u?!!u.active:true;$('ud-bulk').checked=u?!!u.can_bulk_send:false;
+ $('ud-email').value=u?u.email:'';$('ud-email').readOnly=!!u;$('ud-name').value=u?u.name:'';$('ud-role').value=u?u.role:'user';$('ud-active').checked=u?!!u.active:true;$('ud-bulk').checked=u?!!u.can_bulk_send:false;$('ud-contacts').checked=u?!!u.can_edit_contacts:true;
  $('ud-test').value=u&&u.test_number?local(u.test_number):'';$('ud-limit').value=u&&u.daily_limit!==null?String(u.daily_limit):'';$('ud-limit').placeholder='ברירת מחדל: '+nf.format(SETTINGS.default_daily_limit);
  const perms=$('ud-perms');perms.replaceChildren();
  for(const n of NUMBERS){const current=u&&u.numbers.find(function(x){return x.number===n.number;});const row=el('label','perm-row');const name=el('span');name.append(n.label+' · ',el('span','phone',local(n.number)));if(!n.active)name.append(el('span','muted',' (מושבת)'));
   const sel=el('select');sel.dataset.number=n.number;for(const o of [['','ללא גישה'],['view','צפייה'],['send','צפייה ושליחה']]){const opt=el('option','',o[1]);opt.value=o[0];sel.append(opt);}sel.value=current?(current.can_send?'send':'view'):'';row.append(name,sel);perms.append(row);}
  if(!NUMBERS.length)perms.append(el('p','hint','עדיין לא הוגדרו מספרים.'));
  $('ud-delete').hidden=$('ud-disconnect').hidden=!u||u.email===ME.email;$('ud-error').hidden=true;roleChanged();$('user-dlg').showModal();(u?$('ud-name'):$('ud-email')).focus();}
-function roleChanged(){const admin=$('ud-role').value==='admin';$('ud-admin-note').hidden=!admin;$('ud-perms').hidden=admin;$('ud-bulk').disabled=admin;$('ud-limit').disabled=admin;}
+function roleChanged(){const admin=$('ud-role').value==='admin';$('ud-admin-note').hidden=!admin;$('ud-perms').hidden=admin;$('ud-bulk').disabled=admin;$('ud-contacts').disabled=admin;$('ud-limit').disabled=admin;}
 $('ud-role').addEventListener('change',roleChanged);
 $('u-q').addEventListener('input',renderUsers);
 $('u-add').addEventListener('click',function(){openUser(null);});
@@ -144,7 +144,7 @@ $('ud-form').addEventListener('submit',async function(e){e.preventDefault();cons
  const test=$('ud-test').value.trim();if(test&&!normalize(test)){dlgError('ud-error',new Error('מספר הבדיקה אינו תקין'));return;}
  const numbers=[];for(const s of $('ud-perms').querySelectorAll('select'))if(s.value)numbers.push({number:s.dataset.number,can_send:s.value==='send'});
  $('ud-save').disabled=true;
- try{await post('/api/admin/users/save',{create:!editing,email:$('ud-email').value.trim(),name:$('ud-name').value,role:$('ud-role').value,active:$('ud-active').checked,can_bulk_send:$('ud-bulk').checked,daily_limit:limit===''?null:Number(limit),test_number:test?normalize(test):null,numbers:numbers});
+ try{await post('/api/admin/users/save',{create:!editing,email:$('ud-email').value.trim(),name:$('ud-name').value,role:$('ud-role').value,active:$('ud-active').checked,can_bulk_send:$('ud-bulk').checked,can_edit_contacts:$('ud-contacts').checked,daily_limit:limit===''?null:Number(limit),test_number:test?normalize(test):null,numbers:numbers});
   $('user-dlg').close();toast(editing?'המשתמש עודכן':'המשתמש נוסף');await loadUsers();}
  catch(err){dlgError('ud-error',err);}finally{$('ud-save').disabled=false;}});
 $('ud-delete').addEventListener('click',async function(){const email=$('ud-email').value;$('user-dlg').close();
@@ -231,10 +231,11 @@ function details(action,raw){if(!raw)return '';let d;try{d=JSON.parse(raw);}catc
  if(action==='send')return (d.test?'בדיקה · ':'')+nf.format(d.recipients)+' נמענים · '+(SEND_STATUS[d.status]||d.status);
  if(action==='export')return (d.format==='csv'?'CSV':'Excel')+' · '+nf.format((d.columns||[]).length)+' עמודות'+(d.filters&&Object.keys(d.filters).length?' · עם סינון':'');
  if(action==='user.disconnect')return d.disable?'נותק והושבת':'נותק';
+ if(action==='contact.save'&&d.fields)return nf.format(d.fields.length)+' שדות';
  if(action==='contacts.import')return nf.format(d.rows)+' שורות · '+(d.mode==='update'?'עדכון':'דילוג על קיימים');
  if(action.indexOf('list.')===0)return d.size!==undefined?nf.format(d.size)+' מספרים'+(d.shared?' · משותפת':''):'';
  if(action==='optout.add')return nf.format(d.count)+' מספרים';
- if(action.indexOf('user.')===0)return [d.role==='admin'?'מנהל':'משתמש',d.active===false?'מושבת':'',d.numbers&&d.role!=='admin'?nf.format(d.numbers.length)+' מספרים':'',d.can_bulk_send&&d.role!=='admin'?'שליחה מרובה':'',d.daily_limit!==null&&d.daily_limit!==undefined&&d.role!=='admin'?'מגבלה '+nf.format(d.daily_limit):''].filter(Boolean).join(' · ');
+ if(action.indexOf('user.')===0)return [d.role==='admin'?'מנהל':'משתמש',d.active===false?'מושבת':'',d.numbers&&d.role!=='admin'?nf.format(d.numbers.length)+' מספרים':'',d.can_bulk_send&&d.role!=='admin'?'שליחה מרובה':'',d.can_edit_contacts===false&&d.role!=='admin'?'ללא עריכת לקוחות':'',d.daily_limit!==null&&d.daily_limit!==undefined&&d.role!=='admin'?'מגבלה '+nf.format(d.daily_limit):''].filter(Boolean).join(' · ');
  if(action.indexOf('number.')===0)return d.label+(d.active===false?' · מושבת':'');
  return Object.keys(d).map(function(k){const v=d[k];return k+': '+(Array.isArray(v)?v.join(', '):String(v));}).join(' · ');}
 async function loadAudit(reset){if(reset){auditBefore=null;$('a-rows').replaceChildren();}

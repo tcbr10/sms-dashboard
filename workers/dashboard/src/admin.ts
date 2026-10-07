@@ -18,7 +18,7 @@ export async function admin(request: Request, url: URL, env: Env, user: User): P
  if (user.role !== 'admin') throw new HttpError(403,'Admins only');
  const path = url.pathname.slice('/api/admin/'.length);
  if (request.method === 'GET') {
-  if (path === 'users') { const r = await env.DB.prepare("SELECT u.email,u.name,u.role,u.active,u.can_bulk_send,u.daily_limit,u.created_at,u.last_seen_at,u.test_number,u.sessions_revoked_at,(SELECT json_group_array(json_object('number',n.system_number,'can_send',n.can_send)) FROM user_numbers n WHERE n.email=u.email) AS numbers,(SELECT COALESCE(SUM(s.recipients),0) FROM sends s WHERE s.email=u.email AND s.created_at>? AND s.status!='rejected') AS sent_24h FROM users u ORDER BY u.role,u.name,u.email").bind(Date.now()-DAY).all<Record<string,unknown>>(); return json({users:r.results.map(u => ({...u,numbers:JSON.parse(String(u.numbers))}))}); }
+  if (path === 'users') { const r = await env.DB.prepare("SELECT u.email,u.name,u.role,u.active,u.can_bulk_send,u.can_edit_contacts,u.daily_limit,u.created_at,u.last_seen_at,u.test_number,u.sessions_revoked_at,(SELECT json_group_array(json_object('number',n.system_number,'can_send',n.can_send)) FROM user_numbers n WHERE n.email=u.email) AS numbers,(SELECT COALESCE(SUM(s.recipients),0) FROM sends s WHERE s.email=u.email AND s.created_at>? AND s.status!='rejected') AS sent_24h FROM users u ORDER BY u.role,u.name,u.email").bind(Date.now()-DAY).all<Record<string,unknown>>(); return json({users:r.results.map(u => ({...u,numbers:JSON.parse(String(u.numbers))}))}); }
   if (path === 'numbers') return json({numbers:(await env.DB.prepare('SELECT s.number,s.label,s.active,(SELECT COUNT(*) FROM user_numbers u WHERE u.system_number=s.number) AS users FROM system_numbers s ORDER BY s.active DESC,s.label,s.number').all()).results});
   if (path === 'settings') return json(await loadSettings(env.DB));
   if (path === 'contacts') { const q = (url.searchParams.get('q') || '').slice(0,100); const needle = q.replace(/^0/,''); const where = q ? 'WHERE instr(number,?)>0 OR EXISTS (SELECT 1 FROM json_each(data) j WHERE instr(lower(j.value),lower(?))>0)' : '';
@@ -31,7 +31,7 @@ export async function admin(request: Request, url: URL, env: Env, user: User): P
  const body = await readBody(request, 65536);
  if (path === 'users/save') {
   const target = email(body.email); const create = body.create === true; const role = body.role; if (role !== 'admin' && role !== 'user') throw new HttpError(400,'Invalid role');
-  const label = name(body.name); const active = flag(body.active,'active'); const bulk = flag(body.can_bulk_send,'can_bulk_send'); const limit = dailyLimit(body.daily_limit); const test = testNumber(body.test_number);
+  const label = name(body.name); const active = flag(body.active,'active'); const bulk = flag(body.can_bulk_send,'can_bulk_send'); const contacts = body.can_edit_contacts === undefined ? 1 : flag(body.can_edit_contacts,'can_edit_contacts'); const limit = dailyLimit(body.daily_limit); const test = testNumber(body.test_number);
   if (!Array.isArray(body.numbers)) throw new HttpError(400,'numbers must be a list');
   const numbers = new Map<string,number>(); for (const n of body.numbers) { if (!n || typeof n !== 'object') throw new HttpError(400,'Invalid number permission'); const v = n as Record<string,unknown>; numbers.set(phone(v.number),flag(v.can_send,'can_send')); }
   if (numbers.size) { const known = (await env.DB.prepare('SELECT COUNT(*) AS n FROM system_numbers WHERE number IN (SELECT value FROM json_each(?))').bind(JSON.stringify([...numbers.keys()])).first<{n:number}>())?.n; if (known !== numbers.size) throw new HttpError(400,'Unknown system number'); }
@@ -41,10 +41,10 @@ export async function admin(request: Request, url: URL, env: Env, user: User): P
   if (existing?.role === 'admin' && existing.active && (role !== 'admin' || !active) && await activeAdmins(env) <= 1) throw new HttpError(400,'At least one active admin is required');
   const assignments = [...numbers].map(([number,can_send]) => ({number,can_send}));
   await env.DB.batch([
-   env.DB.prepare('INSERT INTO users (email,name,role,active,can_bulk_send,daily_limit,test_number,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET name=excluded.name,role=excluded.role,active=excluded.active,can_bulk_send=excluded.can_bulk_send,daily_limit=excluded.daily_limit,test_number=excluded.test_number').bind(target,label,role,active,bulk,limit,test,Date.now()),
+   env.DB.prepare('INSERT INTO users (email,name,role,active,can_bulk_send,can_edit_contacts,daily_limit,test_number,created_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET name=excluded.name,role=excluded.role,active=excluded.active,can_bulk_send=excluded.can_bulk_send,can_edit_contacts=excluded.can_edit_contacts,daily_limit=excluded.daily_limit,test_number=excluded.test_number').bind(target,label,role,active,bulk,contacts,limit,test,Date.now()),
    env.DB.prepare('DELETE FROM user_numbers WHERE email=?').bind(target),
    env.DB.prepare("INSERT INTO user_numbers (email,system_number,can_send) SELECT ?,json_extract(value,'$.number'),json_extract(value,'$.can_send') FROM json_each(?)").bind(target,JSON.stringify(assignments)),
-   audit(env,user.email,create ? 'user.create' : 'user.update',target,{name:label,role,active:!!active,can_bulk_send:!!bulk,daily_limit:limit,numbers:assignments}),
+   audit(env,user.email,create ? 'user.create' : 'user.update',target,{name:label,role,active:!!active,can_bulk_send:!!bulk,can_edit_contacts:!!contacts,daily_limit:limit,numbers:assignments}),
   ]);
   return json({ok:true});
  }

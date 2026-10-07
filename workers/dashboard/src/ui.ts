@@ -10,6 +10,7 @@ export const ICONS: Record<string,string> = {
  search:'<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',file:'<path d="M7 3.5h6.5L18 8v12.5H7z"/><path d="M13 3.5V8h5"/>',
  filter:'<path d="M4.5 6h15l-6 7v5.5l-3-1.5v-4z"/>',columns:'<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M9.5 5v14M14.5 5v14"/>',download:'<path d="M12 4.5v11M7 11l5 5 5-5M5 19.5h14"/>',
  list:'<path d="M9 7h10M9 12h10M9 17h10M5 7h.01M5 12h.01M5 17h.01"/>',flask:'<path d="M9.5 4h5M10.5 4v5.5L5.5 18a1.5 1.5 0 0 0 1.3 2h10.4a1.5 1.5 0 0 0 1.3-2l-5-8.5V4"/><path d="M8 14.5h8"/>',user:'<circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5a7 7 0 0 1 14 0"/>',trash:'<path d="M5 7h14M10 7V5h4v2M7 7l1 12.5h8L17 7"/>',
+ logout:'<path d="M14 4.5h3.5a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H14M10 16.5L5.5 12 10 7.5M5.5 12H15"/>',edit:'<path d="M4.5 19.5h4l10-10a2.1 2.1 0 0 0-4-4l-10 10z"/><path d="M13.5 6.5l4 4"/>',
  wide:'<path d="M5 6h14M5 12h14M5 18h14"/>',narrow:'<path d="M5 6.5h14M5 10.5h14M5 14.5h14M5 18.5h14"/>',dense:'<path d="M5 5h14M5 8.5h14M5 12h14M5 15.5h14M5 19h14"/>',
 };
 export const svg = (name: string) => '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+ICONS[name]+'</svg>';
@@ -48,7 +49,10 @@ h1{margin:0;font-size:17px;font-weight:650;letter-spacing:-.01em}
 .live.ok .dot{background:var(--good);animation:pulse 2s ease-out infinite}
 .live.err .dot{background:var(--bad)}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(12,163,12,.45)}70%,100%{box-shadow:0 0 0 7px rgba(12,163,12,0)}}
-.who{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--muted)}
+.who{display:grid;place-items:center;width:34px;height:34px;flex:none;padding:0;border:1px solid var(--ring);border-radius:50%;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--ink);font-size:13px;font-weight:650;cursor:pointer}
+.who:hover,.who[aria-expanded=true]{border-color:var(--accent)}
+.who-name{font-weight:650;overflow-wrap:anywhere}
+.who-mail{direction:ltr;text-align:right;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
 main.wrap{display:flex;flex-direction:column;gap:14px;padding-block:16px}
 .panel{position:relative;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--ring);border-radius:14px;background:var(--surface);box-shadow:var(--shadow)}
 .progress{position:absolute;top:0;inset-inline:0;height:2px;overflow:hidden;opacity:0;transition:opacity .2s;z-index:3}
@@ -139,10 +143,12 @@ input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--accent)}
 .menu .opt:hover{background:var(--hover)}
 .menu .opt[aria-checked=true]{font-weight:650;color:var(--accent-ink)}
 .menu hr{width:100%;margin:0;border:0;border-top:1px solid var(--line)}
-.menu input[type=search],.menu input[type=text],.menu input[type=date]{width:100%;min-height:34px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--field)}
+.menu input[type=search],.menu input[type=text],.menu input[type=date],.range input{width:100%;min-height:34px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--field)}
 .check-list{display:grid;gap:2px}
 .check-list .check{padding:4px 2px}
 .presets{display:flex;flex-wrap:wrap;gap:4px}
+.range{display:grid;grid-template-columns:auto minmax(0,1fr) 92px;align-items:center;gap:6px 8px}
+.range input{min-height:34px;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:var(--field)}
 .presets button{padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:var(--field);font-size:12.5px;cursor:pointer}
 .presets button[aria-pressed=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);font-weight:600}
 .bar{height:6px;overflow:hidden;border-radius:999px;background:var(--hover)}
@@ -150,7 +156,7 @@ input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--accent)}
 .dot-on{display:inline-block;width:8px;height:8px;margin-inline-end:6px;border-radius:50%;background:var(--good)}
 @media (min-width:761px) and (min-height:560px){body.app{display:flex;flex-direction:column;height:100dvh}body.app main.wrap{flex:1;min-height:0}body.app .panel.fill{flex:1;min-height:0}body.app .fill .table-wrap{flex:1;min-height:0}}
 @media (max-width:760px){
-.wrap{padding:0 12px}.who,.sub{display:none}.top .wrap{flex-wrap:wrap;gap:8px 12px}.nav{order:3;width:100%}
+.wrap{padding:0 12px}.sub{display:none}.top .wrap{flex-wrap:wrap;gap:8px 12px}.nav{order:3;width:100%}
 .search{flex-basis:100%;max-width:none}.seg{flex:1 1 100%}.seg button{flex:1}.toolbar select{flex:1 1 calc(50% - 4px);min-width:0}.custom{flex:1 1 100%}.custom input{flex:1;min-width:0}
 .grid2{grid-template-columns:1fr}
 }
@@ -163,7 +169,7 @@ export function header(current: 'messages'|'admin', live: boolean): string {
   +'<nav class="nav" aria-label="ניווט">'+link('/','הודעות','nav-messages',current==='messages',false)+link('/admin','ניהול','nav-admin',current==='admin',current!=='admin')+'</nav>'
   +'<div class="top-end"><div class="density" role="group" aria-label="מרווח שורות">'+density+'</div>'
   +(live?'<span class="live" id="live" role="status"><span class="dot"></span><span id="live-text">מתחבר…</span></span>':'')
-  +'<span class="who" id="who"></span></div></div></header>';
+  +'<button type="button" class="who" id="who" aria-haspopup="dialog" aria-expanded="false" aria-label="החשבון שלי"></button></div></div></header>';
 }
 export const baseScript = 'const ICONS='+JSON.stringify(ICONS)+';' + String.raw`
 'use strict';
@@ -186,8 +192,9 @@ function ymd(ms){const p=zoned(ms);return p.year+'-'+pad(p.month)+'-'+pad(p.day)
 function today(){return ymd(Date.now());}
 function shift(day,days){const a=day.split('-').map(Number);return new Date(Date.UTC(a[0],a[1]-1,a[2]+days)).toISOString().slice(0,10);}
 function offset(ms){const p=zoned(ms);return Date.UTC(p.year,p.month-1,p.day,p.hour,p.minute,p.second)-(ms-ms%1000);}
-// Midnight of a calendar day in Israel time, whatever the browser's own timezone is.
-function midnight(day){const a=day.split('-').map(Number);const guess=Date.UTC(a[0],a[1]-1,a[2]);return guess-offset(guess-offset(guess));}
+// A wall-clock time ('HH:MM', default midnight) on a calendar day in Israel time, whatever the browser's own timezone is.
+function israelTime(day,time){const a=day.split('-').map(Number);const t=(time||'00:00').split(':').map(Number);const guess=Date.UTC(a[0],a[1]-1,a[2],t[0],t[1]);return guess-offset(guess-offset(guess));}
+function midnight(day){return israelTime(day);}
 function local(n){if(!/^[+]972[0-9]{8,9}$/.test(n))return n;const l='0'+n.slice(4);return l.length===10?l.slice(0,3)+'-'+l.slice(3,6)+'-'+l.slice(6):l.slice(0,2)+'-'+l.slice(2,5)+'-'+l.slice(5);}
 // Mirrors recipient() on the server: typed or imported numbers, including 972… without a plus and a lost leading zero.
 function normalize(v){let n=String(v).replace(/[\s().\-\u200e\u200f\u202a-\u202e]/g,'');if(/^972[0-9]{8,9}$/.test(n))n='+'+n;else if(/^[2-9][0-9]{7,8}$/.test(n))n='0'+n;if(/^00/.test(n))n='+'+n.slice(2);if(/^0[0-9]{8,9}$/.test(n))n='+972'+n.slice(1);return /^[+][1-9][0-9]{7,14}$/.test(n)?n:null;}
@@ -239,7 +246,13 @@ async function readXlsx(buf){const u8=new Uint8Array(buf),dv=new DataView(buf);l
 function phoneColumn(rows){const sample=rows.slice(0,200);const width=Math.min(50,Math.max.apply(null,sample.map(function(r){return r.length;}).concat([1])));const scores=[];
  for(let c=0;c<width;c++){let s=0;for(const r of sample)if(r[c]&&normalize(r[c]))s++;scores.push(s);}
  const best=scores.indexOf(Math.max.apply(null,scores));return {width:width,scores:scores,best:best,header:rows.length>1&&!normalize(rows[0][best]||'')};}
-async function loadMe(){ME=await get('/api/me');$('who').textContent=ME.name||ME.email;$('who').title=ME.email;$('nav-admin').hidden=ME.role!=='admin';if(ME.settings.org_name)$('org').textContent=ME.settings.org_name;density(ME.density,false);return ME;}
+// Profile menu: who is signed in and sign-out. Sign-out is logged, then Cloudflare Access ends this device's session.
+function initials(name,email){const w=String(name||'').trim().split(/\s+/).filter(Boolean);return (w.length?w.slice(0,2).map(function(x){return Array.from(x)[0];}).join(''):Array.from(email)[0]||'?').toUpperCase();}
+async function signOut(){try{await post('/api/me/logout',{});}catch(e){}location.href='/cdn-cgi/access/logout';}
+$('who').addEventListener('click',function(){const b=this;if(openMenu&&openMenu.anchor===b){closeMenu();return;}b.setAttribute('aria-expanded','true');
+ popover(b,function(m){m.setAttribute('aria-label','החשבון שלי');if(!ME)return;if(ME.name)m.append(el('div','who-name',ME.name));const role=el('div');role.append(el('span','tag'+(ME.role==='admin'?' accent':''),ME.role==='admin'?'מנהל':'משתמש'));m.append(el('div',ME.name?'who-mail':'who-name',ME.email),role,el('hr'));
+  const out=el('button','opt');out.type='button';out.append(icon('logout'),'התנתקות');out.addEventListener('click',function(){out.disabled=true;signOut();});m.append(out);},function(){b.setAttribute('aria-expanded','false');});});
+async function loadMe(){ME=await get('/api/me');$('who').textContent=initials(ME.name,ME.email);$('who').title=ME.name?ME.name+' · '+ME.email:ME.email;$('nav-admin').hidden=ME.role!=='admin';if(ME.settings.org_name)$('org').textContent=ME.settings.org_name;density(ME.density,false);return ME;}
 `;
 // A shared confirm dialog; confirmAction() in the browser fills and opens it.
 const confirmDialog = '<dialog id="confirm-dlg"><form class="dialog-body" id="cf-form"><div class="dialog-head"><h2 id="cf-title"></h2></div><p id="cf-text"></p><label class="check" id="cf-check-row" hidden><input type="checkbox" id="cf-check"><span id="cf-check-label"></span></label><div class="dialog-foot"><span class="end"></span><button type="button" class="ghost" id="cf-cancel">ביטול</button><button type="submit" class="btn danger" id="cf-ok"></button></div></form></dialog>';
