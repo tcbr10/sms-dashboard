@@ -16,10 +16,10 @@ The README documents setup, routes, field mapping and operations in detail.
 | Area | State |
 | --- | --- |
 | Code | `main` is pushed to GitHub. CI runs typecheck and tests on every push. |
-| Dashboard | Deployed (version `91f24968`): table with column choice and header filters (including hours), profile menu with sign-out, contact editing by users, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
+| Dashboard | Deployed (version `a14dbc9f`, with the read-usage fix): table with column choice and header filters (including hours), profile menu with sign-out, contact editing by users, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
 | Ingest | Deployed (version `31c5a24a`) with the two-secret auth and opt-out detection. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
-| D1 | `0001` to `0004` applied. One system number registered; the owner is an admin, and further users are managed on the admin page. |
+| D1 | `0001` to `0004` applied. `0005` (read indexes) is **not applied yet**: on 2026-10-07 the account hit the free plan's 5M rows read per day, and D1 refused every query until midnight UTC. One system number registered; the owner is an admin, and further users are managed on the admin page. |
 | Outgoing logging | Not wired yet. Nothing posts to `/events/outgoing`, so the dashboard shows incoming messages only. |
 
 ## Local-only state on the owner's machine
@@ -57,7 +57,9 @@ The README documents setup, routes, field mapping and operations in detail.
 - **`dest` is required.** Micropay always sends it, and only active registered `system_numbers` are accepted.
 - **The Micropay route never returns reply text.** Any text it returns would be sent to the customer as an SMS. Errors return non-200, and Micropay may then send the customer its own error message, so don't break this route casually.
 - **Sorting is server-side with per-sort keyset cursors.** Live sync merges rows changed since the last sync. Rows that sort past the last loaded page wait for "load more", and the status filter is re-applied in the browser because a status change can move a row out of it.
-- **Polling every 5 s (30 s in background tabs).** That is about 12 small D1 queries a minute per open tab.
+- **Polling every 5 s (30 s in background tabs).** That is about 12 small D1 queries a minute per open tab. D1 bills rows *read*, and the free plan allows 5M a day, so every polling query must seek in an index (check `npx wrangler d1 insights sms-dashboard --config workers/ingest/wrangler.jsonc --sort-by reads`). The test "D1 rows read" guards this.
+- **Keyset cursors are written `expr >= t AND (expr > t OR id > n)`.** The equivalent `expr > t OR (expr = t AND id > n)` can't seek, and made each poll read the whole table. The access condition is `+m.system_number IN (…)`; the `+` keeps it from pulling queries onto the per-number index. Live-update queries use `INDEXED BY idx_messages_updates`.
+- **Summary counts scan every matching message.** They run when the filters change and then at most every 10 minutes; in between the page adds new messages to the totals itself. The customer count updates only with the full count. These counts grow with history and are the main remaining read cost.
 - **Real config values stay local** because the repo is public and the README forbids committing them.
 - **No separate admin password.** Admins sign in like everyone else; the role lives in `users`. Removing a user or a role takes effect on the next request.
 - **Send rights are per number**; bulk sending and a rolling 24-hour recipient limit are per user. Admins have no daily limit.
@@ -119,6 +121,12 @@ Order matters: the migration must exist before code that uses it, and the Access
 1. Done: applied `0004` (adds one column, default on) before deploying, because `loadUser` reads the new column.
 2. Done: deployed the dashboard. Ingest is unchanged by this batch.
 3. On the admin page, turn off "עריכת פרטי לקוחות" (edit contact details) for any user who shouldn't edit contacts.
+
+## Rollout of the read-usage fix
+
+1. Done: deployed the dashboard (works without the new indexes).
+2. After midnight UTC (03:00 Israel), apply `0005` with `npm run db:migrate`. It adds `idx_messages_time` (opening the table) and `idx_messages_peer_time` (conversation view).
+3. Next day, check `wrangler d1 insights` that polling queries read a few rows each.
 
 ## Micropay automation webhook
 
