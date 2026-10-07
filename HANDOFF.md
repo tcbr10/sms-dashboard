@@ -41,13 +41,14 @@ The README documents setup, routes, field mapping and operations in detail.
 | `workers/dashboard/src/admin.ts` | `/api/admin/*`: users (including disconnect), numbers, contacts (including import), settings, opt-outs, activity log |
 | `workers/dashboard/src/lists.ts` | `/api/lists*`: private and admin-shared distribution lists |
 | `workers/dashboard/src/contacts.ts` | `/api/contacts/save`: contact edits by admins and permitted users, merging only the changed fields |
+| `workers/dashboard/src/imports.ts` | `/api/admin/imports*`: message import from spreadsheets (start, rows, undo), duplicate checks |
 | `workers/dashboard/src/send.ts` | `/api/send`: permission and limit checks, idempotent send ID, Micropay call, per-recipient rows |
 | `workers/dashboard/src/ui.ts` | Shared CSS, header, icons and browser helpers (requests, popover menus, confirm dialog, CSV/Excel reader); the no-access and session-ended pages |
 | `workers/dashboard/src/page.ts` | Messages page: columns and header menus, export (CSV and a small .xlsx writer), lists, compose panel with test sends |
 | `workers/dashboard/src/admin-page.ts` | Admin page |
 | `shared/validation.ts` | `Env`, phone and recipient normalization, body reading, cursors |
 | `shared/settings.ts` | Settings defaults and validation, opt-out word matching (also used by ingest) |
-| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission |
+| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id` |
 | `tests/workers.test.ts` | Miniflare D1 tests: ingest, isolation, table queries, access, admin, sending (fake Micropay) |
 | `scripts/preview.ts` | Local preview with seeded data, live inserts and a fake Micropay (`npm run preview`; `PREVIEW_USER=agent@example.com` for a regular user) |
 
@@ -71,6 +72,7 @@ The README documents setup, routes, field mapping and operations in detail.
 - **Sign-out from the profile menu ends only this device's session** (Cloudflare Access logout). It doesn't touch `sessions_revoked_at`, so other devices stay signed in; the admin's disconnect is still the way to end every session.
 - **Contact data is shared, and users edit it with a merge.** Users with `can_edit_contacts` (default on) may edit customers that appear in messages on their numbers. Only changed fields are sent and merged with `json_patch`, so concurrent edits of different fields both survive. Other open tabs see the change after a reload, because contact edits don't touch `messages.updated_at`.
 - **Hour filters are browser-only.** The server already filters by millisecond `from`/`to`; the page converts Israel wall-clock dates and times. "Last hour" and "24 hours" are recomputed on every request.
+- **Message imports write one INSERT … SELECT per batch.** The free plan allows 50 queries per Worker request, so a statement per row would fail. The duplicate check inside it seeks `idx_messages_conversation_time`. Rows without a msgid get a content key (`[dir,'import',system,peer,time,sha256(body),n]`, where n separates identical rows of one file), which is why re-uploading a file adds nothing.
 - **Lists are expanded in the browser** into recipients; the send endpoint stays the single place that validates and limits recipients.
 - **Cursors are UTF-8 base64url**, because contact sort values can be Hebrew.
 
@@ -127,6 +129,11 @@ Order matters: the migration must exist before code that uses it, and the Access
 1. Done: deployed the dashboard (works without the new indexes).
 2. After midnight UTC (03:00 Israel), apply `0005` with `npm run db:migrate`. It adds `idx_messages_time` (opening the table) and `idx_messages_peer_time` (conversation view).
 3. Next day, check `wrangler d1 insights` that polling queries read a few rows each.
+
+## Rollout of message import
+
+1. Apply `0005` and `0006` (`npm run db:migrate`) **before** deploying the dashboard, because message queries now select `m.import_id`.
+2. Deploy the dashboard. Ingest is unchanged.
 
 ## Micropay automation webhook
 

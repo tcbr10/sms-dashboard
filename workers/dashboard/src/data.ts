@@ -6,7 +6,7 @@ type Row = {id:number;sort_key:number|string;contact:string|null;[key:string]:un
 const FROM = 'messages m LEFT JOIN contacts c ON c.number=m.peer_number LEFT JOIN sends s ON s.id=m.send_id';
 // Counts join contacts only when a search or contact filter needs them; D1 bills every joined row read.
 const COUNT_FROM = 'messages m LEFT JOIN contacts c ON c.number=m.peer_number';
-const columns = 'm.id,m.direction,m.system_number,m.peer_number,m.body,m.occurred_at,m.received_at,m.time_source,m.submission_status,m.provider_message_id,m.updated_at,m.sent_by,c.data AS contact,COALESCE(s.is_test,0) AS is_test';
+const columns = 'm.id,m.direction,m.system_number,m.peer_number,m.body,m.occurred_at,m.received_at,m.time_source,m.submission_status,m.provider_message_id,m.updated_at,m.sent_by,m.import_id,c.data AS contact,COALESCE(s.is_test,0) AS is_test';
 // Whitelisted sort expressions. Incoming rows have no status or sender, so they sort as ''.
 const sorts: Record<string,string> = {time:'m.occurred_at',received:'m.received_at',direction:'m.direction',peer:'m.peer_number',number:'m.system_number',status:"COALESCE(m.submission_status,'')",sent_by:"COALESCE(m.sent_by,'')"};
 const numeric = new Set(['time','received']);

@@ -192,8 +192,8 @@ function ymd(ms){const p=zoned(ms);return p.year+'-'+pad(p.month)+'-'+pad(p.day)
 function today(){return ymd(Date.now());}
 function shift(day,days){const a=day.split('-').map(Number);return new Date(Date.UTC(a[0],a[1]-1,a[2]+days)).toISOString().slice(0,10);}
 function offset(ms){const p=zoned(ms);return Date.UTC(p.year,p.month-1,p.day,p.hour,p.minute,p.second)-(ms-ms%1000);}
-// A wall-clock time ('HH:MM', default midnight) on a calendar day in Israel time, whatever the browser's own timezone is.
-function israelTime(day,time){const a=day.split('-').map(Number);const t=(time||'00:00').split(':').map(Number);const guess=Date.UTC(a[0],a[1]-1,a[2],t[0],t[1]);return guess-offset(guess-offset(guess));}
+// A wall-clock time ('HH:MM' or 'HH:MM:SS', default midnight) on a calendar day in Israel time, whatever the browser's own timezone is.
+function israelTime(day,time){const a=day.split('-').map(Number);const t=(time||'00:00').split(':').map(Number);const guess=Date.UTC(a[0],a[1]-1,a[2],t[0],t[1],t[2]||0);return guess-offset(guess-offset(guess));}
 function midnight(day){return israelTime(day);}
 function local(n){if(!/^[+]972[0-9]{8,9}$/.test(n))return n;const l='0'+n.slice(4);return l.length===10?l.slice(0,3)+'-'+l.slice(3,6)+'-'+l.slice(6):l.slice(0,2)+'-'+l.slice(2,5)+'-'+l.slice(5);}
 // Mirrors recipient() on the server: typed or imported numbers, including 972… without a plus and a lost leading zero.

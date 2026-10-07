@@ -279,7 +279,7 @@ function build(m,open,now){const tr=el('tr',m.direction+(open?' open':''));tr.ta
  for(const id of visible)tr.append(cell(col(id),m,now));
  if(open){const det=el('div','details');det.append(fact('נקלטה',fullFmt.format(m.received_at)));if(m.time_source==='receipt')det.append(fact('זמן ההודעה','לפי זמן הקליטה'));
   for(const f of ME.contact_fields)if(m.contact&&m.contact[f.id])det.append(fact(f.label,m.contact[f.id]));
-  if(m.sent_by)det.append(fact('נשלחה על ידי',m.sent_by));if(m.provider_message_id)det.append(fact('מזהה ספק',m.provider_message_id));
+  if(m.sent_by)det.append(fact('נשלחה על ידי',m.sent_by));if(m.import_id)det.append(fact('מקור','ייבוא מקובץ'));if(m.provider_message_id)det.append(fact('מזהה ספק',m.provider_message_id));
   const acts=el('div','actions');if(canSend(m.system_number))acts.append(act('reply','השב'));if(ME.can_edit_contacts&&ME.contact_fields.length)acts.append(act('edit','עריכת פרטים'));acts.append(act('copy','העתקת הטקסט'),act('chat','כל השיחה'));det.append(acts);
   (tr.querySelector('.c-msg')||tr.lastChild).append(det);}
  return tr;}
@@ -290,7 +290,7 @@ function cell(c,m,now){const td=el('td',c.cls);td.dataset.label=c.label;
  else if(c.id==='peer'){const pb=el('button','peer phone',local(m.peer_number));pb.type='button';pb.dataset.peer=m.peer_number;pb.title='כל ההודעות עם '+m.peer_number;td.append(pb);}
  else if(c.id==='number'){const label=labels.get(m.system_number);td.append(el('span',label?'num-label':'num-label phone',label||local(m.system_number)));if(label)td.append(el('span','num-sub phone',local(m.system_number)));}
  else if(c.id==='body')td.append(el('div','body',m.body));
- else if(c.id==='status'){const s=m.direction==='out'&&STATUS[m.submission_status];if(s){const b=el('span','badge '+s[1]);b.title=s[3];b.append(icon(s[2]),s[0]);td.append(b);}else td.append(el('span','dash','—'));if(m.is_test)td.append(el('span','tag test','בדיקה'));}
+ else if(c.id==='status'){const s=m.direction==='out'&&STATUS[m.submission_status];if(s){const b=el('span','badge '+s[1]);b.title=s[3];b.append(icon(s[2]),s[0]);td.append(b);}else td.append(el('span','dash','—'));if(m.is_test)td.append(el('span','tag test','בדיקה'));if(m.import_id)td.append(el('span','tag test','יובאה'));}
  else{const v=c.id==='sent_by'?m.sent_by:m.contact&&m.contact[c.field];if(v)td.textContent=v;else td.append(el('span','dash','—'));}
  return td;}
 function fact(label,value){const e=el('span');e.append(el('b','',label),value);return e;}

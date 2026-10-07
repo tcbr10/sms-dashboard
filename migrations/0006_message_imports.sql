@@ -1,0 +1,3 @@
+CREATE TABLE imports (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, file TEXT NOT NULL, created_at INTEGER NOT NULL, total INTEGER NOT NULL, added INTEGER NOT NULL DEFAULT 0, duplicates INTEGER NOT NULL DEFAULT 0, invalid INTEGER NOT NULL DEFAULT 0, undone_at INTEGER, undone_by TEXT);
+ALTER TABLE messages ADD COLUMN import_id INTEGER;
+CREATE INDEX idx_messages_import ON messages(import_id) WHERE import_id IS NOT NULL;

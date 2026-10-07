@@ -11,7 +11,7 @@ let mf:Miniflare;let env:Env;
 const number='+972501234567',other='+972501234568',peer='+972509876543',token='a'.repeat(40),outToken='b'.repeat(40),message='שלום 👋\n& + "בדיקה" %20';
 beforeAll(async()=>{mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("test")}}',compatibilityDate:'2026-08-06',d1Databases:{DB:'sms-test'}});const bindings=await mf.getBindings();env={DB:bindings.DB as D1Database,INCOMING_TOKEN:token,OUTGOING_TOKEN:outToken};const dir=new URL('../migrations/',import.meta.url);for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(file,dir),'utf8')).split(';').filter(s=>s.trim()))await env.DB.prepare(sql).run();});
 afterAll(async()=>{await mf?.dispose();});
-beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','system_numbers'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
+beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','system_numbers','imports'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
 const user=(email:string,role:'admin'|'user'='user'):User=>({email,name:'',role,can_bulk_send:0,daily_limit:null,density:null,columns:null,test_number:null,sessions_revoked_at:null,can_edit_contacts:1});
 const ctx={waitUntil(){},passThroughOnException(){}} as unknown as ExecutionContext;
 function send(body:Record<string,unknown>,out=false,secret=out?outToken:token){return ingestion.fetch(new Request('https://ingest.test'+(out?'/events/outgoing':'/hooks/incoming'),{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+secret},body:JSON.stringify({event_id:'event-1',system_number:number,peer_number:peer,body:message,...body})}),env);}
@@ -161,6 +161,31 @@ describe('profile sign-out and contact editing by users',()=>{
   expect((await save(false)).status).toBe(200);expect(await body(api('alice@example.com','/api/me'))).toMatchObject({can_edit_contacts:false});expect((await api('alice@example.com','/api/contacts/save',{number:peer,data:{name:'x'}})).status).toBe(403);
   expect(((await body(api('admin@example.com','/api/admin/users'))).users as {email:string;can_edit_contacts:number}[]).find(u=>u.email==='alice@example.com')?.can_edit_contacts).toBe(0);
   expect((await save()).status).toBe(200);expect((await api('alice@example.com','/api/contacts/save',{number:peer,data:{name:'x'}})).status).toBe(200);});
+});
+describe('message import',()=>{
+ const t0=Date.UTC(2026,9,7,9,0);
+ const row=(r:Record<string,unknown>)=>({row:2,direction:'in',system_number:number,peer_number:'0509876543',body:'שלום',occurred_at:t0,...r});
+ async function start(total=10){return (await body(api('admin@example.com','/api/admin/imports/start',{file:'history.xlsx',total}))).id as number;}
+ const rowsOf=(id:number,rows:unknown[])=>api('admin@example.com','/api/admin/imports/rows',{id,rows});
+ it('stores rows, skips duplicates by message ID, within 10 minutes and on re-upload, and adds opt-outs',async()=>{
+  expect((await ingestion.fetch(callback('json',{msgid:'mp-1'}),env)).status).toBe(200);
+  const id=await start();
+  const rows=[row({msgid:'mp-1',body:message}),row({row:3,body:'כן'}),row({row:4,body:'כן',n:1}),row({row:5,direction:'out',body:'תודה',status:'rejected',occurred_at:t0+60000}),row({row:6,body:'הסר',peer_number:'0521112222'}),row({row:7,body:'בלי זמן',occurred_at:null}),row({row:8,system_number:'0501234569'}),row({row:9,peer_number:'abc'})];
+  const first=await body(rowsOf(id,rows));expect(first).toMatchObject({added:5,duplicates:1});expect(first.invalid).toEqual([{row:8,reason:'מספר המערכת אינו רשום או אינו פעיל'},{row:9,reason:'מספר הלקוח אינו תקין'}]);
+  expect(await body(rowsOf(id,rows))).toMatchObject({added:0,duplicates:6});
+  expect(await body(rowsOf(id,[row({row:10,body:'כן',occurred_at:t0+9*60000}),row({row:11,body:'כן',occurred_at:t0+11*60000})]))).toMatchObject({added:1,duplicates:1});
+  const stored=await env.DB.prepare('SELECT direction,body,occurred_at,time_source,submission_status,import_id FROM messages WHERE import_id=? ORDER BY id').bind(id).all<Record<string,unknown>>();
+  expect(stored.results.map(r=>r.body)).toEqual(['כן','כן','תודה','הסר','בלי זמן','כן']);expect(stored.results[2]).toMatchObject({direction:'out',submission_status:'rejected',time_source:'provider'});expect(stored.results[4]).toMatchObject({time_source:'receipt'});
+  expect(await env.DB.prepare("SELECT source FROM opt_outs WHERE number='+972521112222'").first()).toEqual({source:'keyword'});
+  expect((await body(api('admin@example.com','/api/admin/imports'))).imports).toMatchObject([{id,file:'history.xlsx',added:6,duplicates:8,invalid:4}]);
+  expect(((await read('alice@example.com','?limit=100')).messages.filter(m=>m.import_id===id))).toHaveLength(6);});
+ it('undoes exactly the messages an import added',async()=>{expect((await send({})).status).toBe(200);const id=await start();await rowsOf(id,[row({body:'a'}),row({body:'b'})]);
+  expect(await body(api('admin@example.com','/api/admin/imports/undo',{id}))).toEqual({removed:2});expect((await read('alice@example.com')).messages).toHaveLength(1);
+  expect((await api('admin@example.com','/api/admin/imports/undo',{id})).status).toBe(409);expect((await rowsOf(id,[row({body:'c'})])).status).toBe(409);
+  expect(await audits()).toEqual(['messages.import','messages.import.undo']);});
+ it('is for admins only and validates batches',async()=>{expect((await api('alice@example.com','/api/admin/imports/start',{file:'x',total:1})).status).toBe(403);expect((await api('alice@example.com','/api/admin/imports')).status).toBe(403);
+  const id=await start();expect((await rowsOf(id,[])).status).toBe(400);expect((await rowsOf(id,Array.from({length:501},()=>row({})))).status).toBe(400);expect((await rowsOf(999,[row({})])).status).toBe(404);
+  expect(await body(rowsOf(id,[row({direction:'sideways'}),row({occurred_at:'yesterday'}),row({body:' '})]))).toMatchObject({added:0,invalid:[{reason:'כיוון לא תקין'},{reason:'תאריך לא תקין'},{reason:'ההודעה ריקה'}]});});
 });
 describe('D1 rows read',()=>{
  // Records rows_read per query, since D1 bills rows read rather than rows returned.
