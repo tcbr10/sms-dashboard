@@ -162,6 +162,17 @@ describe('profile sign-out and contact editing by users',()=>{
   expect(((await body(api('admin@example.com','/api/admin/users'))).users as {email:string;can_edit_contacts:number}[]).find(u=>u.email==='alice@example.com')?.can_edit_contacts).toBe(0);
   expect((await save()).status).toBe(200);expect((await api('alice@example.com','/api/contacts/save',{number:peer,data:{name:'x'}})).status).toBe(200);});
 });
+describe('D1 rows read',()=>{
+ // Records rows_read per query, since D1 bills rows read rather than rows returned.
+ function metered(){const log:{sql:string;read:number}[]=[];const wrap=(st:D1PreparedStatement,sql:string):D1PreparedStatement=>new Proxy(st,{get(t,k){if(k==='bind')return(...a:unknown[])=>wrap(t.bind(...a),sql);if(k==='all')return async()=>{const r=await t.all();log.push({sql,read:r.meta.rows_read});return r;};const v=Reflect.get(t,k);return typeof v==='function'?v.bind(t):v;}});
+  const db=new Proxy(env.DB,{get(t,k){if(k==='prepare')return(sql:string)=>wrap(t.prepare(sql),sql);const v=Reflect.get(t,k);return typeof v==='function'?v.bind(t):v;}});return {env:{...env,DB:db},log};}
+ beforeEach(async()=>{await env.DB.prepare("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<500) INSERT INTO messages(event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,updated_at) SELECT 'bulk'||i,'in',?,'+9725099'||printf('%05d',i%50),'x',i*1000,i*1000,'receipt',i*1000 FROM n").bind(number).run();});
+ it('reads only new rows when polling and one page when opening the table',async()=>{for(const who of [user('alice@example.com'),user('admin@example.com','admin')]){
+  const m=metered();const first=await (await data(new URL('https://dashboard.test/api/messages?limit=100'),m.env,who)).json() as {sync_cursor:string};
+  expect(m.log.at(-1)!.read).toBeLessThan(150);
+  await data(new URL('https://dashboard.test/api/messages?limit=100&since='+encodeURIComponent(first.sync_cursor)),m.env,who);expect(m.log.at(-1)!.read).toBeLessThan(10);
+  await data(new URL('https://dashboard.test/api/messages?limit=100&since='+encodeURIComponent(encodeCursor({t:400000,id:0}))),m.env,who);expect(m.log.at(-1)!.read).toBeLessThan(120);}});
+});
 describe('Micropay submission responses',()=>{
  it('recognizes plain and JSON queue acceptance, including validate variants',()=>{for(const raw of ['OK 34556','OK 250 34556','OK VALID 34556',{status:1,message:'OK',data:{taskId:'34556'}}])expect(micropaySubmission(raw)).toEqual({submission_status:'accepted',task_id:'34556'});});
  it('does not treat status=1 alone, timeouts or unknown responses as acceptance',()=>{expect(micropaySubmission({status:1,message:'NOT_ENOUGH_CREDIT'})).toEqual({submission_status:'unknown'});expect(micropaySubmission('timeout')).toEqual({submission_status:'unknown'});expect(micropaySubmission({status:0,message:'ERROR'})).toEqual({submission_status:'rejected'});expect(micropaySubmission('ERROR --> Description: invalid token')).toEqual({submission_status:'rejected'});});

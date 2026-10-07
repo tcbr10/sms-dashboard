@@ -170,7 +170,7 @@ const state={q:'',peer:'',sort:'time',order:'desc'};
 const F={range:'',from:'',to:'',fromTime:'',toTime:'',dir:[],status:[],num:[],text:{}};
 let COLS=[],visible=[];
 const rows=new Map(),cache=new Map(),fresh=new Set(),expanded=new Set(),labels=new Map();
-let next=null,sync=null,boundary=null,maxId=null,total=null,gen=0,loading=false,polling=false,paging=false,stopped=false,fails=0,unseen=0,timer=0,debounce=0,saveTimer=0,noNumbers=false;
+let next=null,sync=null,boundary=null,maxId=null,total=null,S=null,statsAt=0,statsStale=false,gen=0,loading=false,polling=false,paging=false,stopped=false,fails=0,unseen=0,timer=0,debounce=0,saveTimer=0,noNumbers=false;
 
 function buildColumns(){COLS=[{id:'time',label:'זמן',sort:'time',filter:'date',cls:'c-time',w:112},
   {id:'direction',label:'כיוון',sort:'direction',filter:'set',key:'dir',options:[['in','נכנסות'],['out','יוצאות']],cls:'c-dir',w:100},
@@ -219,9 +219,12 @@ function fail(e,initial){fails++;const m=e&&e.message||'';
 function busy(on){$('panel').classList.toggle('busy',on);}
 function title(){document.title=(unseen?'('+unseen+') ':'')+'הודעות SMS';}
 
-async function stats(g){try{const s=await get('/api/stats?'+query(true));if(g!==gen)return;maxId=s.max_id;total=s.total;
-  $('s-total').textContent=nf.format(s.total);$('s-in').textContent=nf.format(s.incoming);$('s-out').textContent=nf.format(s.outgoing);$('s-peers').textContent=nf.format(s.peers);count();}
+// Counting scans every matching message, so the full count runs when the filters change and then at most every
+// 10 minutes. In between, new messages from live updates are added to the counts here; the customer count waits for the full count.
+async function stats(g){try{const s=await get('/api/stats?'+query(true));if(g!==gen)return;S=s;maxId=s.max_id;statsAt=Date.now();statsStale=false;showStats();}
  catch(e){if(g===gen)for(const id of ['s-total','s-in','s-out','s-peers'])$(id).textContent='—';}}
+function showStats(){total=S.total;$('s-total').textContent=nf.format(S.total);$('s-in').textContent=nf.format(S.incoming);$('s-out').textContent=nf.format(S.outgoing);$('s-peers').textContent=nf.format(S.peers);count();}
+function bump(m){maxId=Math.max(maxId,m.id);statsStale=true;if(S&&(!F.status.length||F.status.includes(m.submission_status))){S.total++;S[m.direction==='in'?'incoming':'outgoing']++;}}
 async function load(){const g=++gen;loading=true;total=null;maxId=null;busy(true);writeUrl();renderHead();renderChips();render();
  try{const d=(await Promise.all([get('/api/messages?'+query(true)),stats(g)]))[0];if(g!==gen)return;
   rows.clear();cache.clear();$('rows').replaceChildren();fresh.clear();expanded.clear();for(const m of d.messages)rows.set(m.id,m);
@@ -233,11 +236,11 @@ async function load(){const g=++gen;loading=true;total=null;maxId=null;busy(true
 async function poll(){if(loading||polling)return;polling=true;const g=gen;
  try{let changed=false,grew=false;
   for(let i=0;i<20;i++){const p=query(false);p.set('since',sync);const d=await get('/api/messages?'+p);if(g!==gen)return;
-   for(const m of d.messages){const had=rows.has(m.id);if(maxId!==null&&m.id>maxId){grew=true;if(document.hidden&&m.direction==='in')unseen++;}
+   for(const m of d.messages){const had=rows.has(m.id);if(maxId!==null&&m.id>maxId){grew=true;bump(m);if(document.hidden&&m.direction==='in')unseen++;}
     if((F.status.length&&!F.status.includes(m.submission_status))||(boundary&&cmp(m,boundary)>0)){if(had){rows.delete(m.id);changed=true;}continue;}
     rows.set(m.id,m);fresh.add(m.id);changed=true;}
    sync=d.sync_cursor;if(!d.has_more)break;}
-  ok();if(changed)render();if(grew||(changed&&maxId===null))await stats(g);title();}
+  ok();if(grew&&S)showStats();if(changed)render();if((statsStale&&Date.now()-statsAt>600000)||(changed&&maxId===null))await stats(g);title();}
  catch(e){if(g===gen)fail(e,false);}
  finally{polling=false;}}
 async function more(){if(!next||loading||paging)return;paging=true;const g=gen;const b=$('more');b.disabled=true;b.textContent='טוען…';
