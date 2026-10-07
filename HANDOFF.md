@@ -16,11 +16,10 @@ The README documents setup, routes, field mapping and operations in detail.
 | Area | State |
 | --- | --- |
 | Code | `main` is pushed to GitHub. CI runs typecheck and tests on every push. |
-| Dashboard | Deployed (version `2dede4fd`): table, row spacing, users and roles, admin page and sending. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
+| Dashboard | Deployed (version `9aca12da`): table with column choice and header filters, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
 | Ingest | Deployed (version `31c5a24a`) with the two-secret auth and opt-out detection. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
-| D1 | `0001` and `0002` applied. One system number registered; the owner's email is the only user and is an admin. |
-| Not deployed yet | Columns and header filters, contacts, export, disconnect, test sends and distribution lists (migration `0003`). See "Rollout of contacts, export and lists" below. |
+| D1 | `0001`, `0002` and `0003` applied. One system number registered; the owner is an admin, and further users are managed on the admin page. |
 | Outgoing logging | Not wired yet. Nothing posts to `/events/outgoing`, so the dashboard shows incoming messages only. |
 
 ## Local-only state on the owner's machine
@@ -107,9 +106,9 @@ Order matters: the migration must exist before code that uses it, and the Access
 
 ## Rollout of contacts, export and lists
 
-1. Apply `0003`: `npm run db:migrate` (adds tables and columns only).
-2. Deploy the dashboard (`npm run deploy:dashboard`). Ingest is unchanged by this batch.
-3. In the admin page, check the contact fields in Settings, then import contacts if wanted.
+1. Done: applied `0003` (adds tables and columns only).
+2. Done: deployed the dashboard. Ingest is unchanged by this batch.
+3. Owner: in the admin page, check the contact fields in Settings, then import contacts if wanted.
 
 ## Open items
 
