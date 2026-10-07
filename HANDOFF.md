@@ -1,6 +1,6 @@
 # Session handoff
 
-Last updated 2026-10-06. Read this before changing or deploying anything. The repository is **public**: never commit secrets, emails, phone numbers, account or database IDs, Access values or hostnames. Those live only in the local config files described below.
+Last updated 2026-10-07. Read this before changing or deploying anything. The repository is **public**: never commit secrets, emails, phone numbers, account or database IDs, Access values or hostnames. Those live only in the local config files described below.
 
 ## What this is
 
@@ -19,7 +19,7 @@ The README documents setup, routes, field mapping and operations in detail.
 | Dashboard | Deployed (version `9aca12da`): table with column choice and header filters, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
 | Ingest | Deployed (version `31c5a24a`) with the two-secret auth and opt-out detection. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
-| D1 | `0001`, `0002` and `0003` applied. One system number registered; the owner is an admin, and further users are managed on the admin page. |
+| D1 | `0001`, `0002` and `0003` applied. `0004` (per-user contact editing permission) is **not applied yet**. One system number registered; the owner is an admin, and further users are managed on the admin page. |
 | Outgoing logging | Not wired yet. Nothing posts to `/events/outgoing`, so the dashboard shows incoming messages only. |
 
 ## Local-only state on the owner's machine
@@ -40,13 +40,14 @@ The README documents setup, routes, field mapping and operations in detail.
 | `workers/dashboard/src/auth.ts` | Access JWT verification; returns the email and the login time (`iat`) |
 | `workers/dashboard/src/admin.ts` | `/api/admin/*`: users (including disconnect), numbers, contacts (including import), settings, opt-outs, activity log |
 | `workers/dashboard/src/lists.ts` | `/api/lists*`: private and admin-shared distribution lists |
+| `workers/dashboard/src/contacts.ts` | `/api/contacts/save`: contact edits by admins and permitted users, merging only the changed fields |
 | `workers/dashboard/src/send.ts` | `/api/send`: permission and limit checks, idempotent send ID, Micropay call, per-recipient rows |
 | `workers/dashboard/src/ui.ts` | Shared CSS, header, icons and browser helpers (requests, popover menus, confirm dialog, CSV/Excel reader); the no-access and session-ended pages |
 | `workers/dashboard/src/page.ts` | Messages page: columns and header menus, export (CSV and a small .xlsx writer), lists, compose panel with test sends |
 | `workers/dashboard/src/admin-page.ts` | Admin page |
 | `shared/validation.ts` | `Env`, phone and recipient normalization, body reading, cursors |
 | `shared/settings.ts` | Settings defaults and validation, opt-out word matching (also used by ingest) |
-| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends |
+| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission |
 | `tests/workers.test.ts` | Miniflare D1 tests: ingest, isolation, table queries, access, admin, sending (fake Micropay) |
 | `scripts/preview.ts` | Local preview with seeded data, live inserts and a fake Micropay (`npm run preview`; `PREVIEW_USER=agent@example.com` for a regular user) |
 
@@ -65,6 +66,9 @@ The README documents setup, routes, field mapping and operations in detail.
 - **Disconnect needs no Cloudflare API token.** The app refuses Access JWTs whose `iat` is before `users.sessions_revoked_at`; signing in again issues a new JWT.
 - **Exports are built in the browser** from paged API calls (500 per page, 50,000 rows maximum), so the Worker never holds a whole export. Anyone can export what they can see; each export is logged.
 - **Contact field IDs are restricted** to lowercase letters, digits and underscores because they are inlined in JSON paths and column IDs. Removing a field only hides it.
+- **Sign-out from the profile menu ends only this device's session** (Cloudflare Access logout). It doesn't touch `sessions_revoked_at`, so other devices stay signed in; the admin's disconnect is still the way to end every session.
+- **Contact data is shared, and users edit it with a merge.** Users with `can_edit_contacts` (default on) may edit customers that appear in messages on their numbers. Only changed fields are sent and merged with `json_patch`, so concurrent edits of different fields both survive. Other open tabs see the change after a reload, because contact edits don't touch `messages.updated_at`.
+- **Hour filters are browser-only.** The server already filters by millisecond `from`/`to`; the page converts Israel wall-clock dates and times. "Last hour" and "24 hours" are recomputed on every request.
 - **Lists are expanded in the browser** into recipients; the send endpoint stays the single place that validates and limits recipients.
 - **Cursors are UTF-8 base64url**, because contact sort values can be Hebrew.
 
@@ -109,6 +113,16 @@ Order matters: the migration must exist before code that uses it, and the Access
 1. Done: applied `0003` (adds tables and columns only).
 2. Done: deployed the dashboard. Ingest is unchanged by this batch.
 3. Owner: in the admin page, check the contact fields in Settings, then import contacts if wanted.
+
+## Rollout of sign-out, hour filters and user contact editing
+
+1. Apply `0004` (`npm run db:migrate`; adds one column, default on) **before** deploying the dashboard, because `loadUser` reads the new column.
+2. Deploy the dashboard. Ingest is unchanged by this batch.
+3. On the admin page, turn off "עריכת פרטי לקוחות" (edit contact details) for any user who shouldn't edit contacts.
+
+## Micropay automation webhook
+
+The existing route already works for an automation HTTP step: `POST /hooks/micropay/incoming` with `Content-Type: application/json`, `Authorization: Bearer <INCOMING_TOKEN>` and the body `{"origsms":"…","phone":"…","dest":"…","msgid":"…"}`, all as quoted strings. `dest` may be typed as fixed text. Caveats: `msgid` is required, and a message containing quotes or line breaks breaks the JSON if Micropay doesn't escape them (form-urlencoded is the fallback). If the same SMS also reaches Dynamic Text, it is stored once only when both send the same `msgid`. The owner will send a screenshot of the step's fields and variables; if there's no message-ID variable, add a header-only `/hooks/micropay/automation` route where `msgid` is optional.
 
 ## Open items
 
