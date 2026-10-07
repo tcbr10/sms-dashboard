@@ -17,6 +17,10 @@ await env.DB.batch([
  env.DB.prepare("INSERT INTO system_numbers VALUES ('+972501234567','משרד',1),('+972501234568','מכירות',1)"),
  env.DB.prepare("INSERT INTO users (email,name,role,can_bulk_send,created_at) VALUES ('preview@example.com','מנהלת לדוגמה','admin',1,1),('agent@example.com','נציג לדוגמה','user',0,1)"),
  env.DB.prepare("INSERT INTO user_numbers (email,system_number,can_send) VALUES ('agent@example.com','+972501234567',1),('agent@example.com','+972501234568',0)"),
+ env.DB.prepare("UPDATE users SET test_number='+972500000001' WHERE email='preview@example.com'"),
+ env.DB.prepare(`INSERT INTO contacts (number,data,updated_at,updated_by) VALUES ('+972509876543','{"name":"דנה כהן","id_number":"012345678"}',1,'preview@example.com'),('+972521234567','{"name":"אבי לוי"}',1,'preview@example.com'),('+972546667788','{"name":"מיכל ברק","id_number":"087654321"}',1,'preview@example.com')`),
+ env.DB.prepare("INSERT INTO lists (id,owner,name,shared,created_at,updated_at) VALUES (1,'preview@example.com','לקוחות VIP',1,1,1),(2,'preview@example.com','צוות פנימי',0,1,1)"),
+ env.DB.prepare("INSERT INTO list_members (list_id,number) VALUES (1,'+972509876543'),(1,'+972521234567'),(1,'+972546667788'),(2,'+972500000001')"),
 ]);
 const peers = ['+972509876543', '+972521234567', '+972546667788', '+972587654321', '+97235551234', '+447700900123'];
 const texts = ['שלום, אפשר פרטים על המבצע?', 'תודה רבה! מגיע מחר בעשר', 'האם אתם פתוחים בשבת?', 'אני רוצה לבטל את התור של יום ראשון', 'קיבלתי, תודה 🙏', 'כמה עולה המשלוח לחיפה?', 'Hi, is this the right number for support?', 'אפשר לקבל חשבונית במייל?\nתודה, דנה', 'הסר', 'מעולה, נתראה'];
@@ -50,7 +54,7 @@ createServer(async (req, res) => {
  const url = 'http://localhost:' + port + (req.url || '/');
  const headers = new Headers(); for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') headers.set(k, v);
  let response: Response;
- try { response = await handle(new Request(url, {method: req.method, headers, body: chunks.length ? Buffer.concat(chunks) : undefined}), env, email, fakeMicropay); }
+ try { response = await handle(new Request(url, {method: req.method, headers, body: chunks.length ? Buffer.concat(chunks) : undefined}), env, email, {fetcher: fakeMicropay}); }
  catch (error) { response = failure(error); }
  res.writeHead(response.status, Object.fromEntries(response.headers));
  res.end(Buffer.from(await response.arrayBuffer()));

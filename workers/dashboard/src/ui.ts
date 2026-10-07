@@ -8,6 +8,8 @@ export const ICONS: Record<string,string> = {
  reply:'<path d="M10 8L5 12.5 10 17M5.5 12.5H14a5 5 0 0 1 5 5V19"/>',send:'<path d="M4.5 12h11M11 6l6.5 6-6.5 6"/>',plus:'<path d="M12 5v14M5 12h14"/>',
  sort:'<path d="M8 9.5l4-4 4 4M8 14.5l4 4 4-4"/>',asc:'<path d="M12 19V5M7 10l5-5 5 5"/>',desc:'<path d="M12 5v14M7 14l5 5 5-5"/>',close:'<path d="M8 8l8 8M16 8l-8 8"/>',
  search:'<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',file:'<path d="M7 3.5h6.5L18 8v12.5H7z"/><path d="M13 3.5V8h5"/>',
+ filter:'<path d="M4.5 6h15l-6 7v5.5l-3-1.5v-4z"/>',columns:'<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M9.5 5v14M14.5 5v14"/>',download:'<path d="M12 4.5v11M7 11l5 5 5-5M5 19.5h14"/>',
+ list:'<path d="M9 7h10M9 12h10M9 17h10M5 7h.01M5 12h.01M5 17h.01"/>',flask:'<path d="M9.5 4h5M10.5 4v5.5L5.5 18a1.5 1.5 0 0 0 1.3 2h10.4a1.5 1.5 0 0 0 1.3-2l-5-8.5V4"/><path d="M8 14.5h8"/>',user:'<circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5a7 7 0 0 1 14 0"/>',trash:'<path d="M5 7h14M10 7V5h4v2M7 7l1 12.5h8L17 7"/>',
  wide:'<path d="M5 6h14M5 12h14M5 18h14"/>',narrow:'<path d="M5 6.5h14M5 10.5h14M5 14.5h14M5 18.5h14"/>',dense:'<path d="M5 5h14M5 8.5h14M5 12h14M5 15.5h14M5 19h14"/>',
 };
 export const svg = (name: string) => '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+ICONS[name]+'</svg>';
@@ -67,6 +69,7 @@ select{cursor:pointer}
 .custom{display:inline-flex;align-items:center;gap:6px;color:var(--muted)}
 .ghost{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border:0;border-radius:9px;background:transparent;color:var(--accent-ink);font-weight:550;cursor:pointer;text-decoration:none}
 .ghost:hover{background:var(--hover)}
+.ghost:disabled{opacity:.45;cursor:default;background:transparent}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 16px;border:0;border-radius:9px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;white-space:nowrap}
 .btn:hover{filter:brightness(1.07)}
 .btn:disabled{opacity:.55;cursor:default;filter:none}
@@ -130,6 +133,21 @@ dialog::backdrop{background:rgba(0,0,0,.38)}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .check{display:flex;align-items:center;gap:8px;cursor:pointer}
 input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--accent)}
+.menu{position:absolute;z-index:30;display:grid;gap:10px;min-width:220px;max-width:min(320px,calc(100vw - 16px));max-height:min(70vh,520px);overflow:auto;padding:12px;border:1px solid var(--ring);border-radius:12px;background:var(--surface);box-shadow:0 12px 36px rgba(0,0,0,.18);font-size:13.5px;font-weight:400;color:var(--ink)}
+.menu-title{font-size:12.5px;font-weight:650;color:var(--muted)}
+.menu .opt{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border:0;border-radius:7px;background:transparent;text-align:start;cursor:pointer}
+.menu .opt:hover{background:var(--hover)}
+.menu .opt[aria-checked=true]{font-weight:650;color:var(--accent-ink)}
+.menu hr{width:100%;margin:0;border:0;border-top:1px solid var(--line)}
+.menu input[type=search],.menu input[type=text],.menu input[type=date]{width:100%;min-height:34px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--field)}
+.check-list{display:grid;gap:2px}
+.check-list .check{padding:4px 2px}
+.presets{display:flex;flex-wrap:wrap;gap:4px}
+.presets button{padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:var(--field);font-size:12.5px;cursor:pointer}
+.presets button[aria-pressed=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);font-weight:600}
+.bar{height:6px;overflow:hidden;border-radius:999px;background:var(--hover)}
+.bar>div{width:0;height:100%;background:var(--accent);transition:width .2s}
+.dot-on{display:inline-block;width:8px;height:8px;margin-inline-end:6px;border-radius:50%;background:var(--good)}
 @media (min-width:761px) and (min-height:560px){body.app{display:flex;flex-direction:column;height:100dvh}body.app main.wrap{flex:1;min-height:0}body.app .panel.fill{flex:1;min-height:0}body.app .fill .table-wrap{flex:1;min-height:0}}
 @media (max-width:760px){
 .wrap{padding:0 12px}.who,.sub{display:none}.top .wrap{flex-wrap:wrap;gap:8px 12px}.nav{order:3;width:100%}
@@ -172,7 +190,7 @@ function offset(ms){const p=zoned(ms);return Date.UTC(p.year,p.month-1,p.day,p.h
 function midnight(day){const a=day.split('-').map(Number);const guess=Date.UTC(a[0],a[1]-1,a[2]);return guess-offset(guess-offset(guess));}
 function local(n){if(!/^[+]972[0-9]{8,9}$/.test(n))return n;const l='0'+n.slice(4);return l.length===10?l.slice(0,3)+'-'+l.slice(3,6)+'-'+l.slice(6):l.slice(0,2)+'-'+l.slice(2,5)+'-'+l.slice(5);}
 // Mirrors recipient() on the server: typed or imported numbers, including 972… without a plus and a lost leading zero.
-function normalize(v){let n=String(v).replace(/[\s().\-‎‏‪-‮]/g,'');if(/^972[0-9]{8,9}$/.test(n))n='+'+n;else if(/^[2-9][0-9]{7,8}$/.test(n))n='0'+n;if(/^00/.test(n))n='+'+n.slice(2);if(/^0[0-9]{8,9}$/.test(n))n='+972'+n.slice(1);return /^[+][1-9][0-9]{7,14}$/.test(n)?n:null;}
+function normalize(v){let n=String(v).replace(/[\s().\-\u200e\u200f\u202a-\u202e]/g,'');if(/^972[0-9]{8,9}$/.test(n))n='+'+n;else if(/^[2-9][0-9]{7,8}$/.test(n))n='0'+n;if(/^00/.test(n))n='+'+n.slice(2);if(/^0[0-9]{8,9}$/.test(n))n='+972'+n.slice(1);return /^[+][1-9][0-9]{7,14}$/.test(n)?n:null;}
 // An expired Access session answers with a redirect to the login page instead of JSON.
 async function request(path,init){let r;try{r=await fetch(path,Object.assign({cache:'no-store',credentials:'same-origin',redirect:'manual'},init));}catch(e){throw new Error('offline');}
  if(r.type==='opaqueredirect'||r.status===401)throw new Error('auth');let d;try{d=await r.json();}catch(e){throw new Error(r.ok?'auth':'HTTP '+r.status);}
@@ -180,16 +198,59 @@ async function request(path,init){let r;try{r=await fetch(path,Object.assign({ca
 function get(path){return request(path,{headers:{Accept:'application/json'}});}
 function post(path,body){return request(path,{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(body)});}
 function message(e){const m=e&&e.message||'';return m==='auth'?'פג תוקף ההתחברות. יש לרענן את הדף כדי להתחבר מחדש.':m==='offline'?'אין חיבור לשרת.':m;}
+function plural(n,one,many){return n===1?one:nf.format(n)+' '+many;}
 function toast(text){const t=$('toast');t.textContent=text;t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(function(){t.hidden=true;},2400);}
 function density(v,save){if(!['wide','narrow','dense'].includes(v))v='narrow';document.documentElement.dataset.density=v;for(const b of document.querySelectorAll('button[data-density]'))b.setAttribute('aria-pressed',String(b.dataset.density===v));try{localStorage.setItem('density',v);}catch(e){}if(save)post('/api/me/prefs',{density:v}).catch(function(){});}
 for(const b of document.querySelectorAll('button[data-density]'))b.addEventListener('click',function(){density(b.dataset.density,true);});
 (function(){let v=null;try{v=localStorage.getItem('density');}catch(e){}density(v,false);})();
+function confirmAction(titleText,text,okText,checkLabel){return new Promise(function(resolve){const d=$('confirm-dlg');$('cf-title').textContent=titleText;$('cf-text').textContent=text;$('cf-ok').textContent=okText;
+ $('cf-check-row').hidden=!checkLabel;$('cf-check').checked=false;$('cf-check-label').textContent=checkLabel||'';let answer=null;
+ $('cf-form').onsubmit=function(e){e.preventDefault();answer={checked:$('cf-check').checked};d.close();};$('cf-cancel').onclick=function(){d.close();};d.onclose=function(){resolve(answer);};d.showModal();});}
+// Popover menus anchored under a button or header; one at a time, closed by Escape or a click outside.
+let openMenu=null;
+function closeMenu(){if(!openMenu)return;openMenu.el.remove();if(openMenu.onClose)openMenu.onClose();openMenu=null;}
+function popover(anchor,build,onClose){closeMenu();const m=el('div','menu');m.setAttribute('role','dialog');build(m);document.body.append(m);openMenu={el:m,anchor:anchor,onClose:onClose};placeMenu();const f=m.querySelector('input,button,select');if(f)f.focus({preventScroll:true});return m;}
+function placeMenu(){if(!openMenu)return;const r=openMenu.anchor.getBoundingClientRect(),m=openMenu.el;m.style.top=(r.bottom+window.scrollY+4)+'px';m.style.left=Math.max(8,Math.min(r.right-m.offsetWidth,document.documentElement.clientWidth-m.offsetWidth-8))+window.scrollX+'px';}
+document.addEventListener('mousedown',function(e){if(openMenu&&!openMenu.el.contains(e.target)&&!openMenu.anchor.contains(e.target))closeMenu();},true);
+// Header menus are redrawn while open, so focus returns to the matching header if the original anchor is gone.
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&openMenu){const a=openMenu.anchor;closeMenu();const t=a.isConnected?a:a.dataset.col?document.querySelector('th[data-col="'+a.dataset.col+'"] button'):null;if(t)t.focus();}});
+window.addEventListener('resize',placeMenu);
+// Reads CSV, TXT or .xlsx files into rows of cells. CSV may be UTF-8 or Windows-1255 (Hebrew Excel).
+async function readRows(file){const buf=await file.arrayBuffer();if(/[.]xlsx$/i.test(file.name))return readXlsx(buf);let txt;try{txt=new TextDecoder('utf-8',{fatal:true}).decode(buf);}catch(e){txt=new TextDecoder('windows-1255').decode(buf);}
+ const lines=txt.split(/\r?\n/).filter(function(l){return l.trim();}).slice(0,20001);if(!lines.length)return [];
+ const counts=[',',';','\t'].map(function(d){return lines[0].split(d).length;});const delim=[',',';','\t'][counts.indexOf(Math.max.apply(null,counts))];
+ return lines.map(function(l){return splitLine(l,delim);});}
+function splitLine(line,d){const out=[];let cur='',q=false;for(let i=0;i<line.length;i++){const ch=line[i];if(q){if(ch==='"'){if(line[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=ch;}else if(ch==='"')q=true;else if(ch===d){out.push(cur.trim());cur='';}else cur+=ch;}out.push(cur.trim());return out;}
+// Minimal .xlsx reader: unzip with the browser's DecompressionStream and read the first worksheet's cells.
+async function readXlsx(buf){const u8=new Uint8Array(buf),dv=new DataView(buf);let end=-1;for(let i=u8.length-22;i>=Math.max(0,u8.length-65557);i--)if(dv.getUint32(i,true)===0x06054b50){end=i;break;}if(end<0)throw new Error('קובץ Excel לא תקין');
+ const files={};let p=dv.getUint32(end+16,true);const count=dv.getUint16(end+10,true);
+ for(let k=0;k<count;k++){if(dv.getUint32(p,true)!==0x02014b50)throw new Error('קובץ Excel לא תקין');const nameLen=dv.getUint16(p+28,true);files[new TextDecoder().decode(u8.subarray(p+46,p+46+nameLen))]={method:dv.getUint16(p+10,true),size:dv.getUint32(p+20,true),offset:dv.getUint32(p+42,true)};p+=46+nameLen+dv.getUint16(p+30,true)+dv.getUint16(p+32,true);}
+ async function read(name){const f=files[name];if(!f)return null;const start=f.offset+30+dv.getUint16(f.offset+26,true)+dv.getUint16(f.offset+28,true);const data=u8.subarray(start,start+f.size);if(f.method===0)return new TextDecoder().decode(data);if(f.method!==8)throw new Error('קובץ Excel לא נתמך');return new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();}
+ const xml=function(s){return new DOMParser().parseFromString(s,'application/xml');};const shared=[];const ss=await read('xl/sharedStrings.xml');
+ if(ss)for(const si of xml(ss).getElementsByTagName('si'))shared.push(Array.from(si.getElementsByTagName('t')).map(function(t){return t.textContent;}).join(''));
+ const sheet=Object.keys(files).filter(function(n){return /^xl[/]worksheets[/]sheet[0-9]+[.]xml$/.test(n);}).sort(function(a,b){return a.length-b.length||(a<b?-1:1);})[0];if(!sheet)throw new Error('לא נמצא גיליון בקובץ');
+ const out=[];for(const r of Array.from(xml(await read(sheet)).getElementsByTagName('row')).slice(0,20001)){const cells=[];
+  for(const c of r.getElementsByTagName('c')){let col=0;for(const ch of (c.getAttribute('r')||'').replace(/[0-9]/g,''))col=col*26+ch.charCodeAt(0)-64;col=col?col-1:cells.length;
+   const t=c.getAttribute('t');const v=c.getElementsByTagName('v')[0];let val=t==='s'?shared[Number(v&&v.textContent)]||'':t==='inlineStr'?Array.from(c.getElementsByTagName('t')).map(function(x){return x.textContent;}).join(''):v?v.textContent:'';
+   if(!t&&/e/i.test(val))val=Number(val).toFixed(0);cells[col]=String(val||'');}
+  out.push(Array.from(cells,function(x){return x||'';}));}
+ return out;}
+// Scores each column by how many cells are phone numbers and returns the best column and whether row 1 is a header.
+function phoneColumn(rows){const sample=rows.slice(0,200);const width=Math.min(50,Math.max.apply(null,sample.map(function(r){return r.length;}).concat([1])));const scores=[];
+ for(let c=0;c<width;c++){let s=0;for(const r of sample)if(r[c]&&normalize(r[c]))s++;scores.push(s);}
+ const best=scores.indexOf(Math.max.apply(null,scores));return {width:width,scores:scores,best:best,header:rows.length>1&&!normalize(rows[0][best]||'')};}
 async function loadMe(){ME=await get('/api/me');$('who').textContent=ME.name||ME.email;$('who').title=ME.email;$('nav-admin').hidden=ME.role!=='admin';if(ME.settings.org_name)$('org').textContent=ME.settings.org_name;density(ME.density,false);return ME;}
 `;
+// A shared confirm dialog; confirmAction() in the browser fills and opens it.
+const confirmDialog = '<dialog id="confirm-dlg"><form class="dialog-body" id="cf-form"><div class="dialog-head"><h2 id="cf-title"></h2></div><p id="cf-text"></p><label class="check" id="cf-check-row" hidden><input type="checkbox" id="cf-check"><span id="cf-check-label"></span></label><div class="dialog-foot"><span class="end"></span><button type="button" class="ghost" id="cf-cancel">ביטול</button><button type="submit" class="btn danger" id="cf-ok"></button></div></form></dialog>';
 export function shell(nonce: string, title: string, css: string, body: string, script: string, bodyClass = ''): string {
- return '<!doctype html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>'+title+'</title><style nonce="'+nonce+'">'+baseCss+css+'</style></head><body'+(bodyClass?' class="'+bodyClass+'"':'')+'>'+body+'<div class="toast" id="toast" role="status" hidden></div><script nonce="'+nonce+'">'+baseScript+script+'</script></body></html>';
+ return '<!doctype html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>'+title+'</title><style nonce="'+nonce+'">'+baseCss+css+'</style></head><body'+(bodyClass?' class="'+bodyClass+'"':'')+'>'+body+confirmDialog+'<div class="toast" id="toast" role="status" hidden></div><script nonce="'+nonce+'">'+baseScript+script+'</script></body></html>';
+}
+const cardCss = '.card{max-width:460px;margin:12vh auto;padding:28px;text-align:center}.card>.i{width:40px;height:40px;color:var(--accent)}.card h2{margin:12px 0 6px;font-size:19px}.card p{margin:0 0 18px;color:var(--ink2)}';
+export function sessionEndedPage(nonce: string): string {
+ return shell(nonce,'החיבור הסתיים',cardCss,'<main class="wrap"><section class="panel card">'+svg('user')+'<h2>החיבור שלך הסתיים</h2><p>מנהל המערכת ניתק את החיבור שלך. כדי להמשיך יש להתחבר מחדש.</p><a class="btn" href="/cdn-cgi/access/logout">התחברות מחדש</a></section></main>','');
 }
 export function noAccessPage(nonce: string, email: string): string {
- return shell(nonce,'אין גישה','.card{max-width:460px;margin:12vh auto;padding:28px;text-align:center}.card>.i{width:40px;height:40px;color:var(--accent)}.card h2{margin:12px 0 6px;font-size:19px}.card p{margin:0 0 18px;color:var(--ink2)}',
+ return shell(nonce,'אין גישה',cardCss,
   '<main class="wrap"><section class="panel card">'+svg('chat')+'<h2>אין לך גישה למערכת</h2><p>החשבון <bdi>'+escape(email)+'</bdi> אינו מורשה להשתמש בלוח ההודעות. כדי לקבל גישה יש לפנות למנהל המערכת.</p><a class="btn" href="/cdn-cgi/access/logout">התנתקות</a></section></main>','');
 }

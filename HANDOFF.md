@@ -20,6 +20,7 @@ The README documents setup, routes, field mapping and operations in detail.
 | Ingest | Deployed (version `31c5a24a`) with the two-secret auth and opt-out detection. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
 | D1 | `0001` and `0002` applied. One system number registered; the owner's email is the only user and is an admin. |
+| Not deployed yet | Columns and header filters, contacts, export, disconnect, test sends and distribution lists (migration `0003`). See "Rollout of contacts, export and lists" below. |
 | Outgoing logging | Not wired yet. Nothing posts to `/events/outgoing`, so the dashboard shows incoming messages only. |
 
 ## Local-only state on the owner's machine
@@ -36,15 +37,17 @@ The README documents setup, routes, field mapping and operations in detail.
 | `workers/ingest/src/micropay.ts` | Parses Micropay GET/form/JSON callbacks; no-reply acknowledgement (`OK` or `{"reply":""}`) |
 | `workers/dashboard/src/index.ts` | Access JWT check, then `handle()`: user lookup, same-origin check for POSTs, routing; nonce CSP |
 | `workers/dashboard/src/users.ts` | `loadUser`, numbers per user, 24-hour send usage, `/api/me`, preferences, `audit()` |
-| `workers/dashboard/src/data.ts` | `/api/stats`, `/api/messages` (whitelisted sorts, filters, keyset `cursor`, `since` sync), scoped by role |
-| `workers/dashboard/src/admin.ts` | `/api/admin/*`: users, numbers, settings, opt-outs, activity log |
+| `workers/dashboard/src/data.ts` | `/api/stats`, `/api/messages`: joins contacts and sends, per-column filters, whitelisted sorts (including contact fields), keyset `cursor`, `since` sync, export paging and logging; scoped by role |
+| `workers/dashboard/src/auth.ts` | Access JWT verification; returns the email and the login time (`iat`) |
+| `workers/dashboard/src/admin.ts` | `/api/admin/*`: users (including disconnect), numbers, contacts (including import), settings, opt-outs, activity log |
+| `workers/dashboard/src/lists.ts` | `/api/lists*`: private and admin-shared distribution lists |
 | `workers/dashboard/src/send.ts` | `/api/send`: permission and limit checks, idempotent send ID, Micropay call, per-recipient rows |
-| `workers/dashboard/src/ui.ts` | Shared CSS, header, icons and browser helpers; the no-access page |
-| `workers/dashboard/src/page.ts` | Messages page and compose panel (including the CSV/Excel reader) |
+| `workers/dashboard/src/ui.ts` | Shared CSS, header, icons and browser helpers (requests, popover menus, confirm dialog, CSV/Excel reader); the no-access and session-ended pages |
+| `workers/dashboard/src/page.ts` | Messages page: columns and header menus, export (CSV and a small .xlsx writer), lists, compose panel with test sends |
 | `workers/dashboard/src/admin-page.ts` | Admin page |
 | `shared/validation.ts` | `Env`, phone and recipient normalization, body reading, cursors |
 | `shared/settings.ts` | Settings defaults and validation, opt-out word matching (also used by ingest) |
-| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log |
+| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends |
 | `tests/workers.test.ts` | Miniflare D1 tests: ingest, isolation, table queries, access, admin, sending (fake Micropay) |
 | `scripts/preview.ts` | Local preview with seeded data, live inserts and a fake Micropay (`npm run preview`; `PREVIEW_USER=agent@example.com` for a regular user) |
 
@@ -60,6 +63,11 @@ The README documents setup, routes, field mapping and operations in detail.
 - **Send rights are per number**; bulk sending and a rolling 24-hour recipient limit are per user. Admins have no daily limit.
 - **A send is never repeated.** The browser's UUID is claimed in `sends` before Micropay is called; timeouts become `unknown` and are not retried. A rejected send gets a new ID in the browser so the user can fix and resend.
 - **Opt-outs** come from replies that are exactly an opt-out word (checked in ingest) and from admins. Micropay's own removal service doesn't reach this system.
+- **Disconnect needs no Cloudflare API token.** The app refuses Access JWTs whose `iat` is before `users.sessions_revoked_at`; signing in again issues a new JWT.
+- **Exports are built in the browser** from paged API calls (500 per page, 50,000 rows maximum), so the Worker never holds a whole export. Anyone can export what they can see; each export is logged.
+- **Contact field IDs are restricted** to lowercase letters, digits and underscores because they are inlined in JSON paths and column IDs. Removing a field only hides it.
+- **Lists are expanded in the browser** into recipients; the send endpoint stays the single place that validates and limits recipients.
+- **Cursors are UTF-8 base64url**, because contact sort values can be Hebrew.
 
 ## Working on the UI
 
@@ -96,6 +104,12 @@ Order matters: the migration must exist before code that uses it, and the Access
 4. Done: deployed ingest (opt-out detection), then the dashboard.
 5. In Zero Trust, change the dashboard Access policy to admit any email that completes One-time PIN, so users added on the admin page can sign in.
 6. Send one test message to the owner's own phone and confirm the sender format Micropay accepts.
+
+## Rollout of contacts, export and lists
+
+1. Apply `0003`: `npm run db:migrate` (adds tables and columns only).
+2. Deploy the dashboard (`npm run deploy:dashboard`). Ingest is unchanged by this batch.
+3. In the admin page, check the contact fields in Settings, then import contacts if wanted.
 
 ## Open items
 
