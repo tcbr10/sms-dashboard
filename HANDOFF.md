@@ -1,6 +1,6 @@
 # Session handoff
 
-Last updated 2026-10-07. Read this before changing or deploying anything. The repository is **public**: never commit secrets, emails, phone numbers, account or database IDs, Access values or hostnames. Those live only in the local config files described below.
+Last updated 2026-10-08. Read this before changing or deploying anything. The repository is **public**: never commit secrets, emails, phone numbers, account or database IDs, Access values or hostnames. Those live only in the local config files described below.
 
 ## What this is
 
@@ -16,10 +16,10 @@ The README documents setup, routes, field mapping and operations in detail.
 | Area | State |
 | --- | --- |
 | Code | `main` is pushed to GitHub. CI runs typecheck and tests on every push. |
-| Dashboard | Deployed (version `a14dbc9f`, with the read-usage fix): table with column choice and header filters (including hours), profile menu with sign-out, contact editing by users, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
+| Dashboard | Deployed (version `ebb844c6`): message import, read-usage fix, table with column choice and header filters (including hours), profile menu with sign-out, contact editing by users, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
 | Ingest | Deployed (version `31c5a24a`) with the two-secret auth and opt-out detection. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
-| D1 | `0001` to `0004` applied. `0005` (read indexes) is **not applied yet**: on 2026-10-07 the account hit the free plan's 5M rows read per day, and D1 refused every query until midnight UTC. One system number registered; the owner is an admin, and further users are managed on the admin page. |
+| D1 | `0001` to `0006` applied. On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
 | Outgoing logging | Not wired yet. Nothing posts to `/events/outgoing`, so the dashboard shows incoming messages only. |
 
 ## Local-only state on the owner's machine
@@ -127,13 +127,13 @@ Order matters: the migration must exist before code that uses it, and the Access
 ## Rollout of the read-usage fix
 
 1. Done: deployed the dashboard (works without the new indexes).
-2. After midnight UTC (03:00 Israel), apply `0005` with `npm run db:migrate`. It adds `idx_messages_time` (opening the table) and `idx_messages_peer_time` (conversation view).
-3. Next day, check `wrangler d1 insights` that polling queries read a few rows each.
+2. Done: applied `0005` (`idx_messages_time` for opening the table, `idx_messages_peer_time` for the conversation view).
+3. Done: `wrangler d1 insights --time-period 3h` showed polls reading 9–27 rows. Note that `--time-period 1d` can return the previous day's stale aggregate.
 
 ## Rollout of message import
 
-1. Apply `0005` and `0006` (`npm run db:migrate`) **before** deploying the dashboard, because message queries now select `m.import_id`.
-2. Deploy the dashboard. Ingest is unchanged.
+1. Done: applied `0005` and `0006` before deploying, because message queries now select `m.import_id`.
+2. Done: deployed the dashboard. Ingest is unchanged.
 
 ## Micropay automation webhook
 
