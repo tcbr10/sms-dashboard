@@ -166,8 +166,8 @@ const DIR={in:'נכנסת',out:'יוצאת'};
 const RANGES=[['','הכל'],['1h','שעה אחרונה'],['24h','24 שעות'],['today','היום'],['7','7 ימים'],['30','30 ימים'],['custom','טווח']];
 const DATE=/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,TIME=/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/;
 const state={q:'',peer:'',sort:'time',order:'desc'};
-// Column filters: a date range with optional times, value sets (direction, status, system number) and "contains" text keyed by query parameter.
-const F={range:'',from:'',to:'',fromTime:'',toTime:'',dir:[],status:[],num:[],text:{}};
+// Column filters: a date range with optional times or a number of recent hours, value sets (direction, status, system number) and "contains" text keyed by query parameter.
+const F={range:'',hours:0,from:'',to:'',fromTime:'',toTime:'',dir:[],status:[],num:[],text:{}};
 let COLS=[],visible=[];
 const rows=new Map(),cache=new Map(),fresh=new Set(),expanded=new Set(),labels=new Map();
 let next=null,sync=null,boundary=null,maxId=null,total=null,S=null,statsAt=0,statsStale=false,gen=0,loading=false,polling=false,paging=false,stopped=false,fails=0,unseen=0,timer=0,debounce=0,saveTimer=0,noNumbers=false;
@@ -190,20 +190,22 @@ function pick(v,allowed){return (v||'').split(',').filter(function(x){return all
 function textParams(){return COLS.filter(function(c){return c.filter==='text';}).map(function(c){return c.param;});}
 function readUrl(){const p=new URLSearchParams(location.search);state.q=(p.get('q')||'').slice(0,200);state.peer=normalize(p.get('peer')||'')||'';
  const s=p.get('sort');state.sort=COLS.some(function(c){return c.sort&&c.sort===s;})?s:'time';const o=p.get('order');state.order=o==='asc'||o==='desc'?o:'desc';
- F.range=RANGES.some(function(r){return r[0]&&r[0]===p.get('range');})?p.get('range'):'';F.from=DATE.test(p.get('from')||'')?p.get('from'):'';F.to=DATE.test(p.get('to')||'')?p.get('to'):'';
+ F.range=RANGES.some(function(r){return r[0]&&r[0]===p.get('range');})?p.get('range'):'';const h=Number(p.get('hours'));if(p.get('range')==='hours'&&validHours(h)){F.range='hours';F.hours=h;}F.from=DATE.test(p.get('from')||'')?p.get('from'):'';F.to=DATE.test(p.get('to')||'')?p.get('to'):'';
  F.fromTime=TIME.test(p.get('from_t')||'')?p.get('from_t'):'';F.toTime=TIME.test(p.get('to_t')||'')?p.get('to_t'):'';
  F.dir=pick(p.get('dir'),['in','out']);F.status=pick(p.get('status'),Object.keys(STATUS));F.num=pick(p.get('num'),ME.numbers.map(function(n){return n.number;}));
  F.text={};for(const k of textParams()){const v=p.get(k);if(v)F.text[k]=v.slice(0,200);}}
 function writeUrl(){const p=new URLSearchParams();if(state.q)p.set('q',state.q);if(state.peer)p.set('peer',state.peer);if(state.sort!=='time'||state.order!=='desc'){p.set('sort',state.sort);p.set('order',state.order);}
- if(F.range){p.set('range',F.range);if(F.range==='custom'){if(F.from)p.set('from',F.from);if(F.fromTime)p.set('from_t',F.fromTime);if(F.to)p.set('to',F.to);if(F.toTime)p.set('to_t',F.toTime);}}
+ if(F.range){p.set('range',F.range);if(F.range==='hours')p.set('hours',String(F.hours));if(F.range==='custom'){if(F.from)p.set('from',F.from);if(F.fromTime)p.set('from_t',F.fromTime);if(F.to)p.set('to',F.to);if(F.toTime)p.set('to_t',F.toTime);}}
  if(F.dir.length)p.set('dir',F.dir.join(','));if(F.status.length)p.set('status',F.status.join(','));if(F.num.length)p.set('num',F.num.join(','));for(const k in F.text)p.set(k,F.text[k]);
  const s=p.toString();history.replaceState(null,'',s?'?'+s:location.pathname);}
 function active(c){if(!c.filter)return false;if(c.filter==='date')return !!F.range;if(c.filter==='set')return F[c.key].length>0;return !!F.text[c.param];}
-function clearRange(){F.range='';F.from='';F.to='';F.fromTime='';F.toTime='';}
+// Recent hours typed by the user: a whole number up to 30 days.
+function validHours(h){return Number.isInteger(h)&&h>=1&&h<=720;}
+function clearRange(){F.range='';F.hours=0;F.from='';F.to='';F.fromTime='';F.toTime='';}
 function clearColumn(c){if(c.filter==='date')clearRange();else if(c.filter==='set')F[c.key]=[];else delete F.text[c.param];}
 function filtered(){return !!(state.q||state.peer)||COLS.some(active);}
 // A time without a date means today. The end time includes its whole minute; an end date without a time includes the whole day.
-function bounds(){const t=today();if(F.range==='1h'||F.range==='24h')return [Date.now()-(F.range==='1h'?3600000:86400000)];if(F.range==='today')return [midnight(t)];if(F.range==='7'||F.range==='30')return [midnight(shift(t,1-Number(F.range)))];
+function bounds(){const t=today();if(F.range==='1h'||F.range==='24h'||F.range==='hours')return [Date.now()-(F.range==='1h'?1:F.range==='24h'?24:F.hours)*3600000];if(F.range==='today')return [midnight(t)];if(F.range==='7'||F.range==='30')return [midnight(shift(t,1-Number(F.range)))];
  if(F.range==='custom'){const from=F.from||(F.fromTime?t:''),to=F.to||(F.toTime?t:'');return [from?israelTime(from,F.fromTime):undefined,to?(F.toTime?israelTime(to,F.toTime)+60000:midnight(shift(to,1))):undefined];}return [];}
 function query(withStatus){const p=new URLSearchParams();if(F.num.length)p.set('system_number',F.num.join(','));if(state.peer)p.set('peer_number',state.peer);if(state.q)p.set('q',state.q);
  if(F.dir.length)p.set('direction',F.dir.join(','));if(F.status.length&&withStatus)p.set('status',F.status.join(','));for(const k in F.text)p.set(k,F.text[k]);
@@ -304,15 +306,18 @@ function filterControl(c,changed){const box=el('div','check-list');
  if(c.filter==='date'){const pre=el('div','presets');const custom=el('div','range');const from=el('input'),to=el('input'),fromT=el('input'),toT=el('input');from.type=to.type='date';fromT.type=toT.type='time';
   from.value=F.from;to.value=F.to;fromT.value=F.fromTime;toT.value=F.toTime;from.setAttribute('aria-label','מתאריך');fromT.setAttribute('aria-label','משעה');to.setAttribute('aria-label','עד תאריך');toT.setAttribute('aria-label','עד שעה');
   custom.append(el('span','hint','מ־'),from,fromT,el('span','hint','עד'),to,toT);custom.hidden=F.range!=='custom';
-  for(const r of RANGES){const b=el('button','',r[1]);b.type='button';b.setAttribute('aria-pressed',String(F.range===r[0]));b.addEventListener('click',function(){clearRange();F.range=r[0];for(const x of [from,to,fromT,toT])x.value='';for(const x of pre.children)x.setAttribute('aria-pressed',String(x===b));custom.hidden=r[0]!=='custom';changed();});pre.append(b);}
+  const hours=el('label','hours');const hn=el('input');hn.type='number';hn.min='1';hn.max='720';hn.step='1';hn.inputMode='numeric';hn.placeholder='מספר';hn.value=F.range==='hours'?String(F.hours):'';hours.append(hn,el('span','hint','שעות אחרונות'));
+  let ht=0;const applyHours=function(){clearTimeout(ht);const h=Number(hn.value);if(!hn.value||!validHours(h)||(F.range==='hours'&&F.hours===h))return;clearRange();F.range='hours';F.hours=h;for(const x of [from,to,fromT,toT])x.value='';for(const x of pre.children)x.setAttribute('aria-pressed','false');custom.hidden=true;changed();};
+  hn.addEventListener('input',function(){clearTimeout(ht);ht=setTimeout(applyHours,500);});hn.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();applyHours();}});
+  for(const r of RANGES){const b=el('button','',r[1]);b.type='button';b.setAttribute('aria-pressed',String(F.range===r[0]));b.addEventListener('click',function(){clearRange();F.range=r[0];for(const x of [from,to,fromT,toT,hn])x.value='';for(const x of pre.children)x.setAttribute('aria-pressed',String(x===b));custom.hidden=r[0]!=='custom';changed();});pre.append(b);}
   for(const inp of [from,to,fromT,toT])inp.addEventListener('change',function(){F.from=DATE.test(from.value)?from.value:'';F.to=DATE.test(to.value)?to.value:'';F.fromTime=TIME.test(fromT.value)?fromT.value:'';F.toTime=TIME.test(toT.value)?toT.value:'';changed();});
-  box.append(pre,custom);return box;}
+  box.append(pre,hours,custom);return box;}
  if(c.filter==='set'){for(const o of c.options){const l=el('label','check');const cb=el('input');cb.type='checkbox';cb.checked=F[c.key].includes(o[0]);cb.addEventListener('change',function(){F[c.key]=cb.checked?F[c.key].concat([o[0]]):F[c.key].filter(function(x){return x!==o[0];});changed();});l.append(cb,o[1]);box.append(l);}return box;}
  const inp=el('input');inp.type='search';inp.placeholder='מכיל…';inp.value=F.text[c.param]||'';inp.setAttribute('aria-label',c.label+' מכיל');let t=0;
  const apply=function(){clearTimeout(t);const v=inp.value.trim();if((F.text[c.param]||'')===v)return;if(v)F.text[c.param]=v;else delete F.text[c.param];changed();};
  inp.addEventListener('input',function(){clearTimeout(t);t=setTimeout(apply,400);});inp.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();apply();}});box.append(inp);return box;}
 function rangeEnd(day,time){return (day?day.split('-').reverse().join('.'):time?'היום':'…')+(time?' '+time:'');}
-function chipLabel(c){if(c.filter==='date')return c.label+': '+(F.range==='custom'?rangeEnd(F.from,F.fromTime)+' – '+rangeEnd(F.to,F.toTime):RANGES.find(function(r){return r[0]===F.range;})[1]);
+function chipLabel(c){if(c.filter==='date')return c.label+': '+(F.range==='hours'?(F.hours===1?'שעה אחרונה':F.hours+' שעות אחרונות'):F.range==='custom'?rangeEnd(F.from,F.fromTime)+' – '+rangeEnd(F.to,F.toTime):RANGES.find(function(r){return r[0]===F.range;})[1]);
  if(c.filter==='set')return c.label+': '+c.options.filter(function(o){return F[c.key].includes(o[0]);}).map(function(o){return o[1];}).join(', ');return c.label+' מכיל: '+F.text[c.param];}
 function chip(parts,onRemove){const c=el('span','chip');for(const p of parts)c.append(p);const x=el('button');x.type='button';x.title=x.ariaLabel='הסרת הסינון';x.setAttribute('aria-label','הסרת הסינון');x.append(icon('close'));x.addEventListener('click',onRemove);c.append(x);return c;}
 function renderChips(){const chips=$('chips');chips.replaceChildren();

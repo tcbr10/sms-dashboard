@@ -148,7 +148,9 @@ input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--accent)}
 .check-list .check{padding:4px 2px}
 .presets{display:flex;flex-wrap:wrap;gap:4px}
 .range{display:grid;grid-template-columns:auto minmax(0,1fr) 92px;align-items:center;gap:6px 8px}
-.range input{min-height:34px;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:var(--field)}
+.hours{display:flex;align-items:center;gap:8px}
+.hours input{width:84px}
+.range input,.hours input{min-height:34px;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:var(--field)}
 .presets button{padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:var(--field);font-size:12.5px;cursor:pointer}
 .presets button[aria-pressed=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);font-weight:600}
 .bar{height:6px;overflow:hidden;border-radius:999px;background:var(--hover)}
