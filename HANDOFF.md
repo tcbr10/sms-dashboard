@@ -1,6 +1,6 @@
 # Session handoff
 
-Last updated 2026-10-11. Read this before changing or deploying anything. The repository is **public**: never commit secrets, emails, phone numbers, account or database IDs, Access values or hostnames. Those live only in the local config files described below.
+Last updated 2026-10-12. Read this before changing or deploying anything. The repository is **public**: never commit secrets, emails, phone numbers, account or database IDs, Access values or hostnames. Those live only in the local config files described below.
 
 ## What this is
 
@@ -16,7 +16,7 @@ The README documents setup, routes, field mapping and operations in detail.
 | Area | State |
 | --- | --- |
 | Code | `main` is pushed to GitHub. CI runs typecheck and tests on every push. |
-| Dashboard | Deployed (version `168c2918`): message import, read-usage fix, typed recent-hours filter, table with column choice and header filters (including hours), profile menu with sign-out, contact editing by users, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
+| Dashboard | Deployed (version `e5f1c43b`): number parsing with import reports, Access sync (waiting for `CF_API_TOKEN`), message import, read-usage fix, typed recent-hours filter, table with column choice and header filters (including hours), profile menu with sign-out, contact editing by users, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
 | Ingest | Deployed (version `31c5a24a`) with the two-secret auth and opt-out detection. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
 | D1 | `0001` to `0006` applied. On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
@@ -142,7 +142,7 @@ Order matters: the migration must exist before code that uses it, and the Access
 
 1. The owner creates a Cloudflare API token with **Access: Apps and Policies - Edit** on this account and runs `npx wrangler secret put CF_API_TOKEN --config workers/dashboard/wrangler.jsonc`.
 2. Done locally: `ACCESS_ACCOUNT_ID` and `ACCESS_POLICY_ID` are in the git-ignored `workers/dashboard/wrangler.jsonc`.
-3. Deploy the dashboard (no migration), then press "סנכרון עם Cloudflare" on the users tab and check the policy in Zero Trust.
+3. Done: deployed the dashboard (no migration). After the token is set, press "סנכרון עם Cloudflare" on the users tab and check the policy in Zero Trust.
 
 ## Micropay automation webhook
 
