@@ -431,12 +431,12 @@ function renderMembers(){const q=$('le-q').value.replace(/[^0-9+]/g,'');const bo
   if(EDIT.editable){const x=el('button','icon-btn');x.type='button';x.setAttribute('aria-label','הסרת '+local(n));x.append(icon('close'));x.addEventListener('click',function(){EDIT.members.delete(n);renderMembers();});r.append(x);}box.append(r);}
  $('le-count').textContent=plural(EDIT.members.size,'מספר אחד','מספרים')+(shown>300?' · מוצגים 300 הראשונים':'');}
 // Adds typed or imported values ({row,value}) and reports every value that was not added, with the reason.
-function addMembers(items){let added=0;const problems=[],before=new Set(EDIT.members),seen=new Set();
+function addMembers(items,note){note=note||'';let added=0;const problems=[],before=new Set(EDIT.members),seen=new Set();
  for(const it of items)for(const p of phonesIn(it.value)){if(!p.number){problems.push({row:it.row,value:p.value,reason:PHONE_PROBLEMS[p.problem]});continue;}
   if(seen.has(p.number)){problems.push({row:it.row,value:p.value,reason:'מופיע יותר מפעם אחת בקובץ'});continue;}seen.add(p.number);
   if(before.has(p.number)){problems.push({row:it.row,value:p.value,reason:'כבר ברשימה'});continue;}EDIT.members.add(p.number);added++;}
- renderMembers();const bad=problems.length;if(!bad){toast(plural(added,'נוסף מספר אחד','מספרים נוספו'));return;}
- showReport('מספרים שלא נוספו',plural(added,'נוסף מספר אחד','מספרים נוספו')+' · '+plural(bad,'ערך אחד לא נוסף','ערכים לא נוספו')+'. השינוי יישמר ברשימה רק אחרי לחיצה על "שמירה".',problems);}
+ renderMembers();const bad=problems.length;if(!bad){toast(plural(added,'נוסף מספר אחד','מספרים נוספו')+note);return;}
+ showReport('מספרים שלא נוספו',plural(added,'נוסף מספר אחד','מספרים נוספו')+' · '+plural(bad,'ערך אחד לא נוסף','ערכים לא נוספו')+note+'. השינוי יישמר ברשימה רק אחרי לחיצה על "שמירה".',problems);}
 $('le-add-btn').addEventListener('click',function(){addMembers($('le-add').value.split(/[;\n]+/).map(function(v){return {row:0,value:v};}));$('le-add').value='';});
 // File import: pick one column or all of them; row numbers in the report match the file.
 let LIMPORT=null;
@@ -445,9 +445,10 @@ $('le-file').addEventListener('change',async function(){const f=this.files&&this
   const all=el('option','','כל העמודות');all.value='all';sel.append(all);for(let c=0;c<pc.width;c++){const o=el('option','',(pc.header&&r[0][c]?r[0][c]:'עמודה '+(c+1))+(pc.scores[c]?' ('+nf.format(pc.scores[c])+' מספרים)':''));o.value=String(c);sel.append(o);}
   sel.value=pc.scores.filter(function(x){return x>0;}).length>1?'all':String(pc.best);$('le-header').checked=pc.header;$('le-import-info').textContent=f.name+' · '+plural(r.length,'שורה אחת','שורות');$('le-import').hidden=false;}
  catch(e){toast('לא ניתן לקרוא את הקובץ: '+(e.message||e));}});
-$('le-import-add').addEventListener('click',function(){if(!LIMPORT)return;const c=$('le-column').value;const items=[];
- for(let i=$('le-header').checked?1:0;i<LIMPORT.rows.length;i++){const r=LIMPORT.rows[i];const cols=c==='all'?r.map(function(_,k){return k;}):[Number(c)];for(const k of cols){const v=String(r[k]||'').trim();if(v&&(c!=='all'||/[0-9]/.test(v)))items.push({row:i+1,value:v});}}
- LIMPORT=null;$('le-import').hidden=true;addMembers(items);});
+// Empty rows are counted in the summary, so the totals match the number of rows in the file.
+$('le-import-add').addEventListener('click',function(){if(!LIMPORT)return;const c=$('le-column').value;const items=[];let empty=0;
+ for(let i=$('le-header').checked?1:0;i<LIMPORT.rows.length;i++){const r=LIMPORT.rows[i];const cols=c==='all'?r.map(function(_,k){return k;}):[Number(c)];let any=false;for(const k of cols){const v=String(r[k]||'').trim();if(v&&(c!=='all'||/[0-9]/.test(v))){items.push({row:i+1,value:v});any=true;}}if(!any)empty++;}
+ LIMPORT=null;$('le-import').hidden=true;addMembers(items,empty?' · '+plural(empty,'שורה ריקה אחת דולגה','שורות ריקות דולגו'):'');});
 $('le-import-clear').addEventListener('click',function(){LIMPORT=null;$('le-import').hidden=true;});
 $('le-q').addEventListener('input',renderMembers);
 $('ld-edit').addEventListener('submit',async function(e){e.preventDefault();if(!EDIT||!EDIT.editable)return;$('le-save').disabled=true;$('le-error').hidden=true;

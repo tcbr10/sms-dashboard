@@ -248,9 +248,10 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&openMenu){c
 window.addEventListener('resize',placeMenu);
 // Reads CSV, TXT or .xlsx files into rows of cells. CSV may be UTF-8 or Windows-1255 (Hebrew Excel).
 async function readRows(file){const buf=await file.arrayBuffer();if(/[.]xlsx$/i.test(file.name))return readXlsx(buf);let txt;try{txt=new TextDecoder('utf-8',{fatal:true}).decode(buf);}catch(e){txt=new TextDecoder('windows-1255').decode(buf);}
- const lines=txt.split(/\r?\n/).filter(function(l){return l.trim();}).slice(0,20001);if(!lines.length)return [];
- const counts=[',',';','\t'].map(function(d){return lines[0].split(d).length;});const delim=[',',';','\t'][counts.indexOf(Math.max.apply(null,counts))];
- return lines.map(function(l){return splitLine(l,delim);});}
+ // Blank lines stay as empty rows, so row numbers in import reports match the file; only trailing blank lines are dropped.
+ const lines=txt.split(/\r?\n/);while(lines.length&&!lines[lines.length-1].trim())lines.pop();lines.splice(20001);if(!lines.length)return [];
+ const sample=lines.find(function(l){return l.trim();});const counts=[',',';','\t'].map(function(d){return sample.split(d).length;});const delim=[',',';','\t'][counts.indexOf(Math.max.apply(null,counts))];
+ return lines.map(function(l){return l.trim()?splitLine(l,delim):[];});}
 function splitLine(line,d){const out=[];let cur='',q=false;for(let i=0;i<line.length;i++){const ch=line[i];if(q){if(ch==='"'){if(line[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=ch;}else if(ch==='"')q=true;else if(ch===d){out.push(cur.trim());cur='';}else cur+=ch;}out.push(cur.trim());return out;}
 // Minimal .xlsx reader: unzip with the browser's DecompressionStream and read the first worksheet's cells.
 async function readXlsx(buf){const u8=new Uint8Array(buf),dv=new DataView(buf);let end=-1;for(let i=u8.length-22;i>=Math.max(0,u8.length-65557);i--)if(dv.getUint32(i,true)===0x06054b50){end=i;break;}if(end<0)throw new Error('קובץ Excel לא תקין');
@@ -260,11 +261,12 @@ async function readXlsx(buf){const u8=new Uint8Array(buf),dv=new DataView(buf);l
  const xml=function(s){return new DOMParser().parseFromString(s,'application/xml');};const shared=[];const ss=await read('xl/sharedStrings.xml');
  if(ss)for(const si of xml(ss).getElementsByTagName('si'))shared.push(Array.from(si.getElementsByTagName('t')).map(function(t){return t.textContent;}).join(''));
  const sheet=Object.keys(files).filter(function(n){return /^xl[/]worksheets[/]sheet[0-9]+[.]xml$/.test(n);}).sort(function(a,b){return a.length-b.length||(a<b?-1:1);})[0];if(!sheet)throw new Error('לא נמצא גיליון בקובץ');
- const out=[];for(const r of Array.from(xml(await read(sheet)).getElementsByTagName('row')).slice(0,20001)){const cells=[];
+ // Rows are placed by their row number (Excel leaves empty rows out of the file), so report row numbers match the sheet.
+ const out=[];for(const r of Array.from(xml(await read(sheet)).getElementsByTagName('row'))){const at=Number(r.getAttribute('r'))-1||out.length;if(at>=20001)break;const cells=[];
   for(const c of r.getElementsByTagName('c')){let col=0;for(const ch of (c.getAttribute('r')||'').replace(/[0-9]/g,''))col=col*26+ch.charCodeAt(0)-64;col=col?col-1:cells.length;
    const t=c.getAttribute('t');const v=c.getElementsByTagName('v')[0];let val=t==='s'?shared[Number(v&&v.textContent)]||'':t==='inlineStr'?Array.from(c.getElementsByTagName('t')).map(function(x){return x.textContent;}).join(''):v?v.textContent:'';
    if(!t&&/e/i.test(val))val=Number(val).toFixed(0);cells[col]=String(val||'');}
-  out.push(Array.from(cells,function(x){return x||'';}));}
+  while(out.length<at)out.push([]);out[at]=Array.from(cells,function(x){return x||'';});}
  return out;}
 // Scores each column by how many cells are phone numbers and returns the best column and whether row 1 is a header.
 function phoneColumn(rows){const sample=rows.slice(0,200);const width=Math.min(50,Math.max.apply(null,sample.map(function(r){return r.length;}).concat([1])));const scores=[];
