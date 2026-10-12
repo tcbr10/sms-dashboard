@@ -2,6 +2,8 @@ import {Env,HttpError,json,phone,readBody,recipient,text} from '../../../shared/
 import {ContactField,loadSettings,validateSettings} from '../../../shared/settings';
 import {User,audit} from './users';
 import {imports} from './imports';
+import {Fetcher} from './send';
+import {accessConfigured,lastSync,syncAccess} from './access';
 const DAY = 86400000;
 function email(value: unknown): string { const e = text(value,'email',254).trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw new HttpError(400,'Invalid email'); return e; }
 function name(value: unknown): string { if (value === undefined) return ''; if (typeof value !== 'string' || value.trim().length > 80) throw new HttpError(400,'Name must be at most 80 characters'); return value.trim(); }
@@ -15,12 +17,12 @@ function contactData(value: unknown, fields: ContactField[]): Record<string,stri
  return out;
 }
 async function activeAdmins(env: Env): Promise<number> { return (await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role='admin' AND active=1").first<{n:number}>())?.n ?? 0; }
-export async function admin(request: Request, url: URL, env: Env, user: User): Promise<Response> {
+export async function admin(request: Request, url: URL, env: Env, user: User, fetcher: Fetcher): Promise<Response> {
  if (user.role !== 'admin') throw new HttpError(403,'Admins only');
  const path = url.pathname.slice('/api/admin/'.length);
  if (path === 'imports' || path.startsWith('imports/')) return imports(request,path,env,user);
  if (request.method === 'GET') {
-  if (path === 'users') { const r = await env.DB.prepare("SELECT u.email,u.name,u.role,u.active,u.can_bulk_send,u.can_edit_contacts,u.daily_limit,u.created_at,u.last_seen_at,u.test_number,u.sessions_revoked_at,(SELECT json_group_array(json_object('number',n.system_number,'can_send',n.can_send)) FROM user_numbers n WHERE n.email=u.email) AS numbers,(SELECT COALESCE(SUM(s.recipients),0) FROM sends s WHERE s.email=u.email AND s.created_at>? AND s.status!='rejected') AS sent_24h FROM users u ORDER BY u.role,u.name,u.email").bind(Date.now()-DAY).all<Record<string,unknown>>(); return json({users:r.results.map(u => ({...u,numbers:JSON.parse(String(u.numbers))}))}); }
+  if (path === 'users') { const r = await env.DB.prepare("SELECT u.email,u.name,u.role,u.active,u.can_bulk_send,u.can_edit_contacts,u.daily_limit,u.created_at,u.last_seen_at,u.test_number,u.sessions_revoked_at,(SELECT json_group_array(json_object('number',n.system_number,'can_send',n.can_send)) FROM user_numbers n WHERE n.email=u.email) AS numbers,(SELECT COALESCE(SUM(s.recipients),0) FROM sends s WHERE s.email=u.email AND s.created_at>? AND s.status!='rejected') AS sent_24h FROM users u ORDER BY u.role,u.name,u.email").bind(Date.now()-DAY).all<Record<string,unknown>>(); return json({users:r.results.map(u => ({...u,numbers:JSON.parse(String(u.numbers))})),access:{configured:accessConfigured(env),last:await lastSync(env)}}); }
   if (path === 'numbers') return json({numbers:(await env.DB.prepare('SELECT s.number,s.label,s.active,(SELECT COUNT(*) FROM user_numbers u WHERE u.system_number=s.number) AS users FROM system_numbers s ORDER BY s.active DESC,s.label,s.number').all()).results});
   if (path === 'settings') return json(await loadSettings(env.DB));
   if (path === 'contacts') { const q = (url.searchParams.get('q') || '').slice(0,100); const needle = q.replace(/^0/,''); const where = q ? 'WHERE instr(number,?)>0 OR EXISTS (SELECT 1 FROM json_each(data) j WHERE instr(lower(j.value),lower(?))>0)' : '';
@@ -48,14 +50,16 @@ export async function admin(request: Request, url: URL, env: Env, user: User): P
    env.DB.prepare("INSERT INTO user_numbers (email,system_number,can_send) SELECT ?,json_extract(value,'$.number'),json_extract(value,'$.can_send') FROM json_each(?)").bind(target,JSON.stringify(assignments)),
    audit(env,user.email,create ? 'user.create' : 'user.update',target,{name:label,role,active:!!active,can_bulk_send:!!bulk,can_edit_contacts:!!contacts,daily_limit:limit,numbers:assignments}),
   ]);
-  return json({ok:true});
+  // Access only needs updating when someone is added, disabled or re-enabled.
+  const access = create || !!existing?.active !== !!active ? await syncAccess(env,fetcher,user.email) : null;
+  return json({ok:true,access});
  }
  if (path === 'users/delete') {
   const target = email(body.email); if (target === user.email) throw new HttpError(400,'You cannot delete yourself');
   const existing = await env.DB.prepare('SELECT role,active FROM users WHERE email=?').bind(target).first<{role:string;active:number}>(); if (!existing) throw new HttpError(404,'User not found');
   if (existing.role === 'admin' && existing.active && await activeAdmins(env) <= 1) throw new HttpError(400,'At least one active admin is required');
   await env.DB.batch([env.DB.prepare('DELETE FROM user_numbers WHERE email=?').bind(target),env.DB.prepare('DELETE FROM users WHERE email=?').bind(target),audit(env,user.email,'user.delete',target)]);
-  return json({ok:true});
+  return json({ok:true,access:existing.active ? await syncAccess(env,fetcher,user.email) : null});
  }
  // Ends the user's current sign-in: Access logins issued before now are refused, so they must sign in again.
  if (path === 'users/disconnect') {
@@ -63,7 +67,11 @@ export async function admin(request: Request, url: URL, env: Env, user: User): P
   const existing = await env.DB.prepare('SELECT role,active FROM users WHERE email=?').bind(target).first<{role:string;active:number}>(); if (!existing) throw new HttpError(404,'User not found');
   if (disable && existing.role === 'admin' && existing.active && await activeAdmins(env) <= 1) throw new HttpError(400,'At least one active admin is required');
   await env.DB.batch([env.DB.prepare('UPDATE users SET sessions_revoked_at=?'+(disable?',active=0':'')+' WHERE email=?').bind(Date.now(),target),audit(env,user.email,'user.disconnect',target,{disable})]);
-  return json({ok:true});
+  return json({ok:true,access:disable && existing.active ? await syncAccess(env,fetcher,user.email) : null});
+ }
+ if (path === 'users/access-sync') {
+  if (!accessConfigured(env)) throw new HttpError(503,'Cloudflare Access sync is not configured');
+  return json({access:await syncAccess(env,fetcher,user.email)});
  }
  if (path === 'contacts/save') {
   const fields = (await loadSettings(env.DB)).contact_fields; const number = recipient(body.number); const data = contactData(body.data,fields);

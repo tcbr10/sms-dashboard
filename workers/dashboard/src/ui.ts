@@ -143,6 +143,8 @@ input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--accent)}
 .menu .opt:hover{background:var(--hover)}
 .menu .opt[aria-checked=true]{font-weight:650;color:var(--accent-ink)}
 .menu hr{width:100%;margin:0;border:0;border-top:1px solid var(--line)}
+.rp-wrap{max-height:50vh;border:1px solid var(--line);border-radius:9px}
+.rp-wrap td{font-size:13px}
 .menu input[type=search],.menu input[type=text],.menu input[type=date],.range input{width:100%;min-height:34px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--field)}
 .check-list{display:grid;gap:2px}
 .check-list .check{padding:4px 2px}
@@ -173,7 +175,22 @@ export function header(current: 'messages'|'admin', live: boolean): string {
   +(live?'<span class="live" id="live" role="status"><span class="dot"></span><span id="live-text">מתחבר…</span></span>':'')
   +'<button type="button" class="who" id="who" aria-haspopup="dialog" aria-expanded="false" aria-label="החשבון שלי"></button></div></div></header>';
 }
-export const baseScript = 'const ICONS='+JSON.stringify(ICONS)+';' + String.raw`
+// The browser twin of parseRecipient() in shared/validation.ts; tests check that both give the same results.
+export const PHONE_JS = String.raw`
+function parsePhone(v){const s=String(v==null?'':v).replace(/[­​-‏‪-‮⁦-⁩﻿]/g,'').trim();if(!s)return {problem:'empty'};
+ if(/^[0-9]+(?:[.,][0-9]+)?e\+?[0-9]+$/i.test(s))return {problem:'scientific'};
+ const runs=(s.match(/\+?\(?[0-9][0-9\s().\-]*[0-9]/g)||[]).filter(function(r){return r.replace(/[^0-9]/g,'').length>=7;});
+ if(!runs.length)return {problem:/[0-9]/.test(s)?'too_short':'no_number'};if(runs.length>1)return {problem:'several'};
+ let n=runs[0].replace(/[^0-9+]/g,'').replace(/(?!^)\+/g,'');if(n.indexOf('00')===0)n='+'+n.slice(2);
+ if(/^\+?9720/.test(n))n='+972'+n.replace(/^\+?9720/,'');else if(/^972[0-9]/.test(n))n='+'+n;
+ let national;if(n.indexOf('+972')===0)national=n.slice(4);else if(/^0[0-9]/.test(n))national=n.slice(1);else if(/^[2-9][0-9]{7,8}$/.test(n))national=n;
+ else if(/^\+[1-9][0-9]{7,14}$/.test(n))return {number:n};
+ else{const d=n.replace('+','').length;return {problem:d<8?'too_short':d>15?'too_long':'bad_prefix'};}
+ const want=/^[57]/.test(national)?9:/^[23489]/.test(national)?8:0;if(!want)return {problem:'bad_prefix'};
+ if(national.length!==want)return {problem:national.length<want?'too_short':'bad_length'};
+ return {number:'+972'+national};}
+`;
+export const baseScript = 'const ICONS='+JSON.stringify(ICONS)+';' + PHONE_JS + String.raw`
 'use strict';
 const $=id=>document.getElementById(id);
 const TZ='Asia/Jerusalem';
@@ -198,8 +215,13 @@ function offset(ms){const p=zoned(ms);return Date.UTC(p.year,p.month-1,p.day,p.h
 function israelTime(day,time){const a=day.split('-').map(Number);const t=(time||'00:00').split(':').map(Number);const guess=Date.UTC(a[0],a[1]-1,a[2],t[0],t[1],t[2]||0);return guess-offset(guess-offset(guess));}
 function midnight(day){return israelTime(day);}
 function local(n){if(!/^[+]972[0-9]{8,9}$/.test(n))return n;const l='0'+n.slice(4);return l.length===10?l.slice(0,3)+'-'+l.slice(3,6)+'-'+l.slice(6):l.slice(0,2)+'-'+l.slice(2,5)+'-'+l.slice(5);}
-// Mirrors recipient() on the server: typed or imported numbers, including 972… without a plus and a lost leading zero.
-function normalize(v){let n=String(v).replace(/[\s().\-\u200e\u200f\u202a-\u202e]/g,'');if(/^972[0-9]{8,9}$/.test(n))n='+'+n;else if(/^[2-9][0-9]{7,8}$/.test(n))n='0'+n;if(/^00/.test(n))n='+'+n.slice(2);if(/^0[0-9]{8,9}$/.test(n))n='+972'+n.slice(1);return /^[+][1-9][0-9]{7,14}$/.test(n)?n:null;}
+const PHONE_PROBLEMS={empty:'ריק',scientific:'Excel שמר את המספר בכתיב מדעי (כמו 5.01E+08) וספרות אבדו',no_number:'לא נמצא מספר טלפון',several:'יותר ממספר אחד בתא',too_short:'חסרות ספרות',too_long:'יותר מדי ספרות',bad_prefix:'קידומת לא תקינה',bad_length:'יותר מדי ספרות לקידומת הזו'};
+function normalize(v){return parsePhone(v).number||null;}
+// A spreadsheet cell or typed entry may hold several numbers ("050… / 052…"); each part with digits is parsed on its own.
+// Labels such as "בית" next to a number are ignored, and a cell where no part is a number is reported once.
+function phonesIn(v){const s=String(v==null?'':v).trim();if(!s)return [];const one=function(x){const r=parsePhone(x);return {value:x,number:r.number||null,problem:r.problem||null};};
+ const parts=s.split(/[,;\/|\n]+|\s+או\s+/).map(function(x){return x.trim();}).filter(function(x){return /[0-9]/.test(x);});if(parts.length<2)return [one(s)];
+ const all=parts.map(one);return all.some(function(x){return x.number;})?all:[one(s)];}
 // An expired Access session answers with a redirect to the login page instead of JSON.
 async function request(path,init){let r;try{r=await fetch(path,Object.assign({cache:'no-store',credentials:'same-origin',redirect:'manual'},init));}catch(e){throw new Error('offline');}
  if(r.type==='opaqueredirect'||r.status===401)throw new Error('auth');let d;try{d=await r.json();}catch(e){throw new Error(r.ok?'auth':'HTTP '+r.status);}
@@ -208,7 +230,7 @@ function get(path){return request(path,{headers:{Accept:'application/json'}});}
 function post(path,body){return request(path,{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(body)});}
 function message(e){const m=e&&e.message||'';return m==='auth'?'פג תוקף ההתחברות. יש לרענן את הדף כדי להתחבר מחדש.':m==='offline'?'אין חיבור לשרת.':m;}
 function plural(n,one,many){return n===1?one:nf.format(n)+' '+many;}
-function toast(text){const t=$('toast');t.textContent=text;t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(function(){t.hidden=true;},2400);}
+function toast(text){const t=$('toast');t.textContent=text;t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(function(){t.hidden=true;},Math.max(2400,text.length*70));}
 function density(v,save){if(!['wide','narrow','dense'].includes(v))v='narrow';document.documentElement.dataset.density=v;for(const b of document.querySelectorAll('button[data-density]'))b.setAttribute('aria-pressed',String(b.dataset.density===v));try{localStorage.setItem('density',v);}catch(e){}if(save)post('/api/me/prefs',{density:v}).catch(function(){});}
 for(const b of document.querySelectorAll('button[data-density]'))b.addEventListener('click',function(){density(b.dataset.density,true);});
 (function(){let v=null;try{v=localStorage.getItem('density');}catch(e){}density(v,false);})();
@@ -247,7 +269,17 @@ async function readXlsx(buf){const u8=new Uint8Array(buf),dv=new DataView(buf);l
 // Scores each column by how many cells are phone numbers and returns the best column and whether row 1 is a header.
 function phoneColumn(rows){const sample=rows.slice(0,200);const width=Math.min(50,Math.max.apply(null,sample.map(function(r){return r.length;}).concat([1])));const scores=[];
  for(let c=0;c<width;c++){let s=0;for(const r of sample)if(r[c]&&normalize(r[c]))s++;scores.push(s);}
- const best=scores.indexOf(Math.max.apply(null,scores));return {width:width,scores:scores,best:best,header:rows.length>1&&!normalize(rows[0][best]||'')};}
+ // Row 1 counts as a header only when it holds text and not a number, so a first real number is never dropped.
+ const best=scores.indexOf(Math.max.apply(null,scores));const first=String(rows[0]&&rows[0][best]||'');return {width:width,scores:scores,best:best,header:rows.length>1&&/[A-Za-z\u0590-\u05ff]/.test(first)&&!normalize(first)};}
+// Lists every value an import left out and why; the list can be downloaded as CSV.
+function showReport(title,summary,problems){$('rp-title').textContent=title;$('rp-summary').textContent=summary;const body=$('rp-rows');body.replaceChildren();
+ for(const p of problems.slice(0,1000)){const tr=el('tr');tr.append(el('td','muted',p.row?String(p.row):'—'),el('td','phone',p.value),el('td','',p.reason));body.append(tr);}
+ $('rp-more').hidden=problems.length<=1000;$('rp-more').textContent='מוצגות 1,000 השורות הראשונות מתוך '+nf.format(problems.length)+'. הקובץ להורדה כולל את כולן.';$('rp-table').hidden=!problems.length;$('rp-download').hidden=!problems.length;
+ $('rp-download').onclick=function(){const q=function(x){x=String(x==null?'':x);return /[",\r\n]/.test(x)||/^[=+\-@]/.test(x)?'"'+(/^[=+\-@]/.test(x)?"'":'')+x.replace(/"/g,'""')+'"':x;};
+  const csv=String.fromCharCode(0xfeff)+['שורה,ערך,סיבה'].concat(problems.map(function(p){return [p.row||'',p.value,p.reason].map(q).join(',');})).join('\r\n');
+  const a=el('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download='import-problems.csv';document.body.append(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(a.href);},20000);};
+ $('report-dlg').showModal();}
+$('rp-close').addEventListener('click',function(){$('report-dlg').close();});
 // Profile menu: who is signed in and sign-out. Sign-out is logged, then Cloudflare Access ends this device's session.
 function initials(name,email){const w=String(name||'').trim().split(/\s+/).filter(Boolean);return (w.length?w.slice(0,2).map(function(x){return Array.from(x)[0];}).join(''):Array.from(email)[0]||'?').toUpperCase();}
 async function signOut(){try{await post('/api/me/logout',{});}catch(e){}location.href='/cdn-cgi/access/logout';}
@@ -257,9 +289,10 @@ $('who').addEventListener('click',function(){const b=this;if(openMenu&&openMenu.
 async function loadMe(){ME=await get('/api/me');$('who').textContent=initials(ME.name,ME.email);$('who').title=ME.name?ME.name+' · '+ME.email:ME.email;$('nav-admin').hidden=ME.role!=='admin';if(ME.settings.org_name)$('org').textContent=ME.settings.org_name;density(ME.density,false);return ME;}
 `;
 // A shared confirm dialog; confirmAction() in the browser fills and opens it.
+const reportDialog = '<dialog id="report-dlg" aria-labelledby="rp-title"><div class="dialog-body"><div class="dialog-head"><h2 id="rp-title"></h2></div><p id="rp-summary"></p><div class="table-wrap rp-wrap" id="rp-table"><table><thead><tr><th><span>שורה</span></th><th><span>ערך</span></th><th><span>סיבה</span></th></tr></thead><tbody id="rp-rows"></tbody></table></div><p class="hint" id="rp-more" hidden></p><div class="dialog-foot"><button type="button" class="ghost" id="rp-download">'+svg('download')+'הורדת הפירוט (CSV)</button><span class="end"></span><button type="button" class="btn" id="rp-close">סגירה</button></div></div></dialog>';
 const confirmDialog = '<dialog id="confirm-dlg"><form class="dialog-body" id="cf-form"><div class="dialog-head"><h2 id="cf-title"></h2></div><p id="cf-text"></p><label class="check" id="cf-check-row" hidden><input type="checkbox" id="cf-check"><span id="cf-check-label"></span></label><div class="dialog-foot"><span class="end"></span><button type="button" class="ghost" id="cf-cancel">ביטול</button><button type="submit" class="btn danger" id="cf-ok"></button></div></form></dialog>';
 export function shell(nonce: string, title: string, css: string, body: string, script: string, bodyClass = ''): string {
- return '<!doctype html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>'+title+'</title><style nonce="'+nonce+'">'+baseCss+css+'</style></head><body'+(bodyClass?' class="'+bodyClass+'"':'')+'>'+body+confirmDialog+'<div class="toast" id="toast" role="status" hidden></div><script nonce="'+nonce+'">'+baseScript+script+'</script></body></html>';
+ return '<!doctype html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>'+title+'</title><style nonce="'+nonce+'">'+baseCss+css+'</style></head><body'+(bodyClass?' class="'+bodyClass+'"':'')+'>'+body+confirmDialog+reportDialog+'<div class="toast" id="toast" role="status" hidden></div><script nonce="'+nonce+'">'+baseScript+script+'</script></body></html>';
 }
 const cardCss = '.card{max-width:460px;margin:12vh auto;padding:28px;text-align:center}.card>.i{width:40px;height:40px;color:var(--accent)}.card h2{margin:12px 0 6px;font-size:19px}.card p{margin:0 0 18px;color:var(--ink2)}';
 export function sessionEndedPage(nonce: string): string {

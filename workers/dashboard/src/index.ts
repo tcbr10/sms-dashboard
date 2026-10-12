@@ -25,12 +25,12 @@ export async function handle(request:Request,env:Env,who:string|Identity,options
   if (url.pathname==='/api/me/logout') return logout(env,user);
   if (url.pathname==='/api/contacts/save') return saveContact(request,env,user);
   if (url.pathname.startsWith('/api/lists/')) return lists(request,url,env,user);
-  if (url.pathname.startsWith('/api/admin/')) return admin(request,url,env,user);
+  if (url.pathname.startsWith('/api/admin/')) return admin(request,url,env,user,options.fetcher??((input,init)=>fetch(input,init)));
   throw new HttpError(404,'Not found'); }
  if (request.method!=='GET') throw new HttpError(405,'GET or POST required');
  if (url.pathname==='/api/me') return me(env,user);
  if (url.pathname==='/api/lists'||url.pathname.startsWith('/api/lists/')) return lists(request,url,env,user);
- if (url.pathname.startsWith('/api/admin/')) return admin(request,url,env,user);
+ if (url.pathname.startsWith('/api/admin/')) return admin(request,url,env,user,options.fetcher??((input,init)=>fetch(input,init)));
  if (url.pathname.startsWith('/api/')) return data(url,env,user);
  if (url.pathname==='/') return html(page(nonce),nonce);
  if (url.pathname==='/admin') return user.role==='admin'?html(adminPage(nonce),nonce):Response.redirect(new URL('/',url).toString(),302);

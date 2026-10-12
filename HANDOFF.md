@@ -42,6 +42,7 @@ The README documents setup, routes, field mapping and operations in detail.
 | `workers/dashboard/src/lists.ts` | `/api/lists*`: private and admin-shared distribution lists |
 | `workers/dashboard/src/contacts.ts` | `/api/contacts/save`: contact edits by admins and permitted users, merging only the changed fields |
 | `workers/dashboard/src/imports.ts` | `/api/admin/imports*`: message import from spreadsheets (start, rows, undo), duplicate checks |
+| `workers/dashboard/src/access.ts` | Cloudflare Access policy sync (active users' emails) |
 | `workers/dashboard/src/send.ts` | `/api/send`: permission and limit checks, idempotent send ID, Micropay call, per-recipient rows |
 | `workers/dashboard/src/ui.ts` | Shared CSS, header, icons and browser helpers (requests, popover menus, confirm dialog, CSV/Excel reader); the no-access and session-ended pages |
 | `workers/dashboard/src/page.ts` | Messages page: columns and header menus, export (CSV and a small .xlsx writer), lists, compose panel with test sends |
@@ -73,6 +74,8 @@ The README documents setup, routes, field mapping and operations in detail.
 - **Contact data is shared, and users edit it with a merge.** Users with `can_edit_contacts` (default on) may edit customers that appear in messages on their numbers. Only changed fields are sent and merged with `json_patch`, so concurrent edits of different fields both survive. Other open tabs see the change after a reload, because contact edits don't touch `messages.updated_at`.
 - **Hour filters are browser-only.** The server already filters by millisecond `from`/`to`; the page converts Israel wall-clock dates and times. "Last hour" and "24 hours" are recomputed on every request.
 - **Message imports write one INSERT … SELECT per batch.** The free plan allows 50 queries per Worker request, so a statement per row would fail. The duplicate check inside it seeks `idx_messages_conversation_time`. Rows without a msgid get a content key (`[dir,'import',system,peer,time,sha256(body),n]`, where n separates identical rows of one file), which is why re-uploading a file adds nothing.
+- **One phone parser, written twice.** `parseRecipient()` (server) and `PHONE_JS`/`parsePhone()` (browser) must stay identical; the "phone number parsing" test runs both on the same cases. `phone()`, used for Micropay's own numbers in ingest, stays lenient.
+- **Access sync rewrites only email rules,** always the full list of active users, and never blocks a user change. The policy ID and account ID live only in the local `wrangler.jsonc`.
 - **Lists are expanded in the browser** into recipients; the send endpoint stays the single place that validates and limits recipients.
 - **Cursors are UTF-8 base64url**, because contact sort values can be Hebrew.
 
@@ -134,6 +137,12 @@ Order matters: the migration must exist before code that uses it, and the Access
 
 1. Done: applied `0005` and `0006` before deploying, because message queries now select `m.import_id`.
 2. Done: deployed the dashboard. Ingest is unchanged.
+
+## Rollout of number parsing and Access sync
+
+1. The owner creates a Cloudflare API token with **Access: Apps and Policies - Edit** on this account and runs `npx wrangler secret put CF_API_TOKEN --config workers/dashboard/wrangler.jsonc`.
+2. Done locally: `ACCESS_ACCOUNT_ID` and `ACCESS_POLICY_ID` are in the git-ignored `workers/dashboard/wrangler.jsonc`.
+3. Deploy the dashboard (no migration), then press "סנכרון עם Cloudflare" on the users tab and check the policy in Zero Trust.
 
 ## Micropay automation webhook
 

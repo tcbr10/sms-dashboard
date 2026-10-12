@@ -5,7 +5,8 @@ import ingestion from '../workers/ingest/src/index';
 import dashboard,{handle} from '../workers/dashboard/src/index';
 import {data} from '../workers/dashboard/src/data';
 import {User} from '../workers/dashboard/src/users';
-import {Env,encodeCursor,failure} from '../shared/validation';
+import {Env,encodeCursor,failure,parseRecipient} from '../shared/validation';
+import {PHONE_JS} from '../workers/dashboard/src/ui';
 import {micropaySubmission} from '../shared/micropay-submission';
 let mf:Miniflare;let env:Env;
 const number='+972501234567',other='+972501234568',peer='+972509876543',token='a'.repeat(40),outToken='b'.repeat(40),message='שלום 👋\n& + "בדיקה" %20';
@@ -161,6 +162,47 @@ describe('profile sign-out and contact editing by users',()=>{
   expect((await save(false)).status).toBe(200);expect(await body(api('alice@example.com','/api/me'))).toMatchObject({can_edit_contacts:false});expect((await api('alice@example.com','/api/contacts/save',{number:peer,data:{name:'x'}})).status).toBe(403);
   expect(((await body(api('admin@example.com','/api/admin/users'))).users as {email:string;can_edit_contacts:number}[]).find(u=>u.email==='alice@example.com')?.can_edit_contacts).toBe(0);
   expect((await save()).status).toBe(200);expect((await api('alice@example.com','/api/contacts/save',{number:peer,data:{name:'x'}})).status).toBe(200);});
+});
+describe('Cloudflare Access sync',()=>{
+ const policyId='policy-1',appId='app-1';
+ function fakeCloudflare(opts:{appScoped?:boolean;failPut?:boolean}={}){const calls:{method:string;url:string;body?:unknown}[]=[];
+  let policy:Record<string,unknown>={id:policyId,name:'Dashboard users',decision:'allow',created_at:'x',reusable:true,include:[{email:{email:'old@example.com'}},{email_domain:{domain:'example.org'}}],exclude:[],require:[],session_duration:'24h'};
+  const fetcher=async(url:string,init:RequestInit)=>{const method=init.method||'GET';calls.push({method,url,body:init.body?JSON.parse(String(init.body)):undefined});
+   expect((init.headers as Record<string,string>).Authorization).toBe('Bearer token');const ok=(result:unknown)=>new Response(JSON.stringify({success:true,result}));
+   const reusable=url.endsWith('/access/policies/'+policyId),scoped=url.endsWith('/access/apps/'+appId+'/policies/'+policyId);
+   if(reusable&&opts.appScoped)return new Response(JSON.stringify({success:false,errors:[{message:'not found'}]}),{status:404});
+   if(url.includes('/access/apps?'))return ok([{id:'other',aud:'x'},{id:appId,aud:'the-aud'}]);
+   if(reusable||scoped){if(method==='PUT'){if(opts.failPut)return new Response(JSON.stringify({success:false,errors:[{message:'Authentication error'}]}),{status:403});policy={...policy,...(init.body?JSON.parse(String(init.body)):{})};}return ok(policy);}
+   return new Response('{}',{status:404});};
+  return {fetcher,calls,policy:()=>policy};}
+ const cfEnv=()=>({...env,CF_API_TOKEN:'token',ACCESS_ACCOUNT_ID:'acct',ACCESS_POLICY_ID:policyId,ACCESS_AUD:'the-aud'});
+ const call=(cf:{fetcher:(u:string,i:RequestInit)=>Promise<Response>},path:string,b?:unknown)=>handle(new Request(ORIGIN+path,b===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify(b)}),cfEnv() as Env,'admin@example.com',{fetcher:cf.fetcher}).catch(failure);
+ const save=(email:string,active:boolean)=>({create:false,email,role:'user',active,can_bulk_send:false,daily_limit:null,numbers:[]});
+ it('writes active users into the policy, keeps other rules and read-only fields out',async()=>{const cf=fakeCloudflare();
+  const d=await body(call(cf,'/api/admin/users/save',{...save('new@example.com',true),create:true}));expect(d.access).toMatchObject({ok:true,emails:5});
+  const put=cf.calls.find(c=>c.method==='PUT')!;expect(put.url).toBe('https://api.cloudflare.com/client/v4/accounts/acct/access/policies/'+policyId);
+  expect(put.body).toMatchObject({name:'Dashboard users',decision:'allow',session_duration:'24h'});expect(put.body).not.toHaveProperty('id');expect(put.body).not.toHaveProperty('created_at');
+  expect(cf.policy().include).toEqual([{email_domain:{domain:'example.org'}},...['admin','alice','bob','new','shared'].map(n=>({email:{email:n+'@example.com'}}))]);
+  cf.calls.length=0;await call(cf,'/api/admin/users/save',save('bob@example.com',true));expect(cf.calls).toHaveLength(0);
+  expect((await body(call(cf,'/api/admin/users/save',save('bob@example.com',false)))).access).toMatchObject({ok:true,emails:4});expect(JSON.stringify(cf.policy().include)).not.toContain('bob@');
+  expect((await body(call(cf,'/api/admin/users/delete',{email:'alice@example.com'}))).access).toMatchObject({ok:true,emails:3});
+  expect(((await body(call(cf,'/api/admin/users'))).access as {configured:boolean;last:{ok:boolean}})).toMatchObject({configured:true,last:{ok:true,emails:3}});});
+ it('finds a policy inside the dashboard application by its AUD',async()=>{const cf=fakeCloudflare({appScoped:true});expect((await body(call(cf,'/api/admin/users/access-sync',{}))).access).toMatchObject({ok:true,emails:4});
+  expect(cf.calls.find(c=>c.method==='PUT')!.url).toBe('https://api.cloudflare.com/client/v4/accounts/acct/access/apps/'+appId+'/policies/'+policyId);});
+ it('saves the user even when Cloudflare refuses, and reports why',async()=>{const cf=fakeCloudflare({failPut:true});
+  const d=await body(call(cf,'/api/admin/users/save',{...save('new@example.com',true),create:true}));expect(d).toMatchObject({ok:true,access:{ok:false,error:'Authentication error'}});
+  expect(await env.DB.prepare("SELECT 1 AS x FROM users WHERE email='new@example.com'").first()).toEqual({x:1});expect((await audits()).slice(-1)).toEqual(['access.sync']);});
+ it('does nothing when not configured',async()=>{expect(await body(api('admin@example.com','/api/admin/users/save',{...save('new@example.com',true),create:true}))).toEqual({ok:true,access:null});
+  expect((await api('admin@example.com','/api/admin/users/access-sync',{})).status).toBe(503);});
+});
+describe('phone number parsing',()=>{
+ const cases:[string,string][]=[['050-123-4567','+972501234567'],['0501234567','+972501234567'],['501234567','+972501234567'],['972501234567','+972501234567'],['+972-50-123-4567','+972501234567'],
+  ['+972 (0)50-123-4567','+972501234567'],['9720501234567','+972501234567'],['00972501234567','+972501234567'],['‪050-1234567‬','+972501234567'],['⁦050 123 4567⁩','+972501234567'],
+  ['050 123 4567','+972501234567'],['050-1234567 בית','+972501234567'],['טל: 050-1234567','+972501234567'],['02-6251234','+97226251234'],['26251234','+97226251234'],['077-1234567','+972771234567'],
+  ['+447700900123','+447700900123'],['050-123456','too_short'],['05012345678','bad_length'],['5.01235E+08','scientific'],['1-800-123-456','bad_prefix'],['abc','no_number'],['12','too_short'],
+  ['050-1234567 / 052-7654321','several'],['','empty']];
+ const browser=new Function(PHONE_JS+';return parsePhone;')() as (v:string)=>{number?:string;problem?:string};
+ it.each(cases)('%s',(input,expected)=>{const want=expected.startsWith('+')?{number:expected}:{problem:expected};expect(parseRecipient(input)).toEqual(want);expect(browser(input)).toEqual(want);});
 });
 describe('message import',()=>{
  const t0=Date.UTC(2026,9,7,9,0);

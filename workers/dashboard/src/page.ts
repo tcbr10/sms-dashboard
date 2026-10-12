@@ -48,6 +48,7 @@ tr.open .body{display:block;overflow:visible}
 .more{height:36px;padding:0 16px;border:1px solid var(--line);border-radius:9px;background:var(--field);cursor:pointer}
 #filters-btn{display:none}
 #c-file-btn,#le-file-btn{cursor:pointer}
+#c-invalid-more{height:24px;margin-inline-start:6px;padding:0 6px}
 #c-to:placeholder-shown,#le-add:placeholder-shown{direction:rtl}
 .dialog-body .banner{border:0;border-radius:9px}
 .check-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 12px}
@@ -115,7 +116,7 @@ const body = header('messages',true) + String.raw`
   <textarea id="c-to" dir="ltr" rows="3" placeholder="מספרי טלפון מופרדים בפסיק או בשורה חדשה"></textarea>
   <div class="row"><span class="hint" id="c-summary"></span><span class="end"></span><button type="button" class="ghost" id="c-save-list" hidden>`+svg('list')+String.raw`שמירה כרשימה</button><label class="ghost" id="c-file-btn">`+svg('file')+String.raw`ייבוא מקובץ<input type="file" id="c-file" accept=".csv,.txt,.xlsx" hidden></label></div>
   <div class="row" id="c-import" hidden><span class="hint" id="c-import-info"></span><label class="row hint">עמודת הטלפון<select id="c-column"></select></label><button type="button" class="ghost danger" id="c-import-clear">הסרת הקובץ</button></div>
-  <p class="hint bad" id="c-invalid" hidden></p>
+  <p class="hint bad" id="c-invalid" hidden><span id="c-invalid-text"></span><button type="button" class="ghost" id="c-invalid-more">פירוט</button></p>
  </div>
  <div class="fld" id="c-lists-row" hidden><span class="label">רשימות תפוצה</span><div class="check-grid" id="c-lists"></div></div>
  <div class="fld"><label class="label" for="c-body">הודעה</label><textarea id="c-body" rows="5" maxlength="1000"></textarea>
@@ -140,7 +141,8 @@ const body = header('messages',true) + String.raw`
   <label class="fld"><span>שם הרשימה</span><input id="le-name" maxlength="60" required></label>
   <label class="check" id="le-shared-row"><input type="checkbox" id="le-shared">רשימה משותפת לכל המשתמשים</label>
   <div class="fld"><label class="label" for="le-add">הוספת מספרים</label><textarea id="le-add" dir="ltr" rows="2" placeholder="מספרים מופרדים בפסיק או בשורה חדשה"></textarea>
-   <div class="row"><button type="button" class="ghost" id="le-add-btn">`+svg('plus')+String.raw`הוספה</button><label class="ghost" id="le-file-btn">`+svg('file')+String.raw`ייבוא מקובץ<input type="file" id="le-file" accept=".csv,.txt,.xlsx" hidden></label><span class="hint end" id="le-count"></span></div></div>
+   <div class="row"><button type="button" class="ghost" id="le-add-btn">`+svg('plus')+String.raw`הוספה</button><label class="ghost" id="le-file-btn">`+svg('file')+String.raw`ייבוא מקובץ<input type="file" id="le-file" accept=".csv,.txt,.xlsx" hidden></label><span class="hint end" id="le-count"></span></div>
+   <div class="row" id="le-import" hidden><span class="hint" id="le-import-info"></span><label class="row hint">עמודה<select id="le-column"></select></label><label class="check hint"><input type="checkbox" id="le-header">השורה הראשונה היא כותרות</label><button type="button" class="ghost" id="le-import-add">`+svg('plus')+String.raw`הוספת המספרים</button><button type="button" class="ghost danger" id="le-import-clear">ביטול</button></div></div>
   <div class="fld"><input type="search" id="le-q" class="field" placeholder="חיפוש ברשימה" aria-label="חיפוש ברשימה"><div class="members" id="le-members"></div></div>
   <div class="banner" id="le-error" role="alert" hidden></div>
   <div class="dialog-foot"><button type="button" class="ghost danger" id="le-delete">מחיקת הרשימה</button><span class="end"></span><button type="button" class="ghost" id="le-back">חזרה לרשימות</button><button type="submit" class="btn" id="le-save">שמירה</button></div>
@@ -423,14 +425,30 @@ async function openLists(){showListIndex();$('lists-dlg').showModal();await load
 async function editList(id,seed){let l={id:null,name:'',shared:0,editable:true,numbers:seed||[]};if(id){try{l=await get('/api/lists/members?id='+id);}catch(e){toast(message(e));return;}}
  EDIT={id:l.id,editable:l.editable,members:new Set(l.numbers)};$('le-name').value=l.name;$('le-shared').checked=!!l.shared;$('le-shared-row').hidden=ME.role!=='admin';
  for(const x of ['le-name','le-shared','le-add','le-add-btn'])$(x).disabled=!l.editable;$('le-file-btn').hidden=!l.editable;$('le-delete').hidden=!l.id||!l.editable;$('le-save').hidden=!l.editable;
- $('le-error').hidden=true;$('le-q').value='';$('le-add').value='';$('ld-index').hidden=true;$('ld-edit').hidden=false;if(!$('lists-dlg').open)$('lists-dlg').showModal();renderMembers();$('le-name').focus();}
+ $('le-error').hidden=true;$('le-q').value='';$('le-add').value='';LIMPORT=null;$('le-import').hidden=true;$('ld-index').hidden=true;$('ld-edit').hidden=false;if(!$('lists-dlg').open)$('lists-dlg').showModal();renderMembers();$('le-name').focus();}
 function renderMembers(){const q=$('le-q').value.replace(/[^0-9+]/g,'');const box=$('le-members');box.replaceChildren();let shown=0;
  for(const n of EDIT.members){if(q&&n.indexOf(q.replace(/^0/,''))<0&&local(n).replace(/-/g,'').indexOf(q)<0)continue;if(++shown>300)break;const r=el('div','member');r.append(el('span','phone',local(n)));
   if(EDIT.editable){const x=el('button','icon-btn');x.type='button';x.setAttribute('aria-label','הסרת '+local(n));x.append(icon('close'));x.addEventListener('click',function(){EDIT.members.delete(n);renderMembers();});r.append(x);}box.append(r);}
  $('le-count').textContent=plural(EDIT.members.size,'מספר אחד','מספרים')+(shown>300?' · מוצגים 300 הראשונים':'');}
-function addMembers(values){let bad=0;for(const v of values){const n=normalize(v);if(n)EDIT.members.add(n);else if(String(v).trim())bad++;}renderMembers();if(bad)toast(bad===1?'ערך לא תקין אחד לא נוסף':nf.format(bad)+' ערכים לא תקינים לא נוספו');}
-$('le-add-btn').addEventListener('click',function(){addMembers($('le-add').value.split(/[,;\n]+/));$('le-add').value='';});
-$('le-file').addEventListener('change',async function(){const f=this.files&&this.files[0];this.value='';if(!f)return;try{const r=await readRows(f);const pc=phoneColumn(r);addMembers(r.slice(pc.header?1:0).map(function(x){return x[pc.best]||'';}));}catch(e){toast('לא ניתן לקרוא את הקובץ: '+(e.message||e));}});
+// Adds typed or imported values ({row,value}) and reports every value that was not added, with the reason.
+function addMembers(items){let added=0;const problems=[],before=new Set(EDIT.members),seen=new Set();
+ for(const it of items)for(const p of phonesIn(it.value)){if(!p.number){problems.push({row:it.row,value:p.value,reason:PHONE_PROBLEMS[p.problem]});continue;}
+  if(seen.has(p.number)){problems.push({row:it.row,value:p.value,reason:'מופיע יותר מפעם אחת בקובץ'});continue;}seen.add(p.number);
+  if(before.has(p.number)){problems.push({row:it.row,value:p.value,reason:'כבר ברשימה'});continue;}EDIT.members.add(p.number);added++;}
+ renderMembers();const bad=problems.length;if(!bad){toast(plural(added,'נוסף מספר אחד','מספרים נוספו'));return;}
+ showReport('מספרים שלא נוספו',plural(added,'נוסף מספר אחד','מספרים נוספו')+' · '+plural(bad,'ערך אחד לא נוסף','ערכים לא נוספו')+'. השינוי יישמר ברשימה רק אחרי לחיצה על "שמירה".',problems);}
+$('le-add-btn').addEventListener('click',function(){addMembers($('le-add').value.split(/[;\n]+/).map(function(v){return {row:0,value:v};}));$('le-add').value='';});
+// File import: pick one column or all of them; row numbers in the report match the file.
+let LIMPORT=null;
+$('le-file').addEventListener('change',async function(){const f=this.files&&this.files[0];this.value='';if(!f)return;
+ try{if(f.size>5242880)throw new Error('הקובץ גדול מדי (עד 5MB)');const r=await readRows(f);if(!r.length)throw new Error('הקובץ ריק');const pc=phoneColumn(r);LIMPORT={rows:r,width:pc.width};const sel=$('le-column');sel.replaceChildren();
+  const all=el('option','','כל העמודות');all.value='all';sel.append(all);for(let c=0;c<pc.width;c++){const o=el('option','',(pc.header&&r[0][c]?r[0][c]:'עמודה '+(c+1))+(pc.scores[c]?' ('+nf.format(pc.scores[c])+' מספרים)':''));o.value=String(c);sel.append(o);}
+  sel.value=pc.scores.filter(function(x){return x>0;}).length>1?'all':String(pc.best);$('le-header').checked=pc.header;$('le-import-info').textContent=f.name+' · '+plural(r.length,'שורה אחת','שורות');$('le-import').hidden=false;}
+ catch(e){toast('לא ניתן לקרוא את הקובץ: '+(e.message||e));}});
+$('le-import-add').addEventListener('click',function(){if(!LIMPORT)return;const c=$('le-column').value;const items=[];
+ for(let i=$('le-header').checked?1:0;i<LIMPORT.rows.length;i++){const r=LIMPORT.rows[i];const cols=c==='all'?r.map(function(_,k){return k;}):[Number(c)];for(const k of cols){const v=String(r[k]||'').trim();if(v&&(c!=='all'||/[0-9]/.test(v)))items.push({row:i+1,value:v});}}
+ LIMPORT=null;$('le-import').hidden=true;addMembers(items);});
+$('le-import-clear').addEventListener('click',function(){LIMPORT=null;$('le-import').hidden=true;});
 $('le-q').addEventListener('input',renderMembers);
 $('ld-edit').addEventListener('submit',async function(e){e.preventDefault();if(!EDIT||!EDIT.editable)return;$('le-save').disabled=true;$('le-error').hidden=true;
  try{const d=await post('/api/lists/save',{id:EDIT.id,name:$('le-name').value,shared:$('le-shared').checked,numbers:Array.from(EDIT.members)});listNumbers.delete(d.id);toast('הרשימה נשמרה ('+plural(d.size,'מספר אחד','מספרים')+')');showListIndex();await loadLists();}
@@ -457,15 +475,18 @@ function renderComposeLists(){const box=$('c-lists');box.replaceChildren();const
  for(const l of LISTS){const lab=el('label','check');const cb=el('input');cb.type='checkbox';cb.checked=C.lists.has(l.id);cb.addEventListener('change',async function(){if(!cb.checked){C.lists.delete(l.id);edited();return;}
    try{if(!listNumbers.has(l.id))listNumbers.set(l.id,(await get('/api/lists/members?id='+l.id)).numbers);C.lists.add(l.id);}catch(e){cb.checked=false;composeError(message(e));}edited();});
   lab.append(cb,l.name+' ('+nf.format(l.size)+')');box.append(lab);}}
-function recipients(){const typed=$('c-to').value.split(/[,;\n]+/).map(function(s){return s.trim();}).filter(Boolean);let all=typed.concat(C.imported);for(const id of C.lists)all=all.concat(listNumbers.get(id)||[]);const valid=new Set(),invalid=[];
- for(const r of all){const n=normalize(r);if(n&&(ME.settings.allow_international||n.indexOf('+972')===0))valid.add(n);else invalid.push(r);}
- return {list:Array.from(valid),invalid:invalid,duplicates:all.length-invalid.length-valid.size};}
+// Typed entries, imported cells ({row,value}) and list members. Each rejected value keeps its reason for the report.
+function recipients(){const typed=$('c-to').value.split(/[;\n]+/).map(function(s){return {row:0,value:s.trim()};}).filter(function(x){return x.value;});
+ let all=typed.concat(C.imported);for(const id of C.lists)all=all.concat((listNumbers.get(id)||[]).map(function(n){return {row:0,value:n};}));const valid=new Set(),invalid=[];let found=0;
+ for(const it of all)for(const p of phonesIn(it.value)){if(!p.number){invalid.push({row:it.row,value:p.value,reason:PHONE_PROBLEMS[p.problem]});continue;}
+  if(!ME.settings.allow_international&&p.number.indexOf('+972')!==0){invalid.push({row:it.row,value:p.value,reason:'מספר מחוץ לישראל (שליחה לחו״ל כבויה בהגדרות)'});continue;}found++;valid.add(p.number);}
+ return {list:Array.from(valid),invalid:invalid,duplicates:found-valid.size};}
 // Micropay bills 70 characters for a single Hebrew SMS and 67 per part after that (140 and 134 in English).
 function segments(text){const len=text.replace(/\n/g,'\r\n').length;if(!len)return 0;const uni=/[^\x00-\x7f]/.test(text);return len<=(uni?70:140)?1:Math.ceil(len/(uni?67:134));}
 function finalBody(n){let b=$('c-body').value;const t=ME.settings.optout_text;if(n>1&&t&&b.indexOf(t)<0)b+='\n'+t;return b;}
 function updateCompose(){const r=recipients();const n=r.list.length;const body=finalBody(n);const seg=segments(body);
  $('c-summary').textContent=n?nf.format(n)+(n===1?' נמען':' נמענים')+(r.duplicates?' · '+(r.duplicates===1?'כפילות אחת הוסרה':nf.format(r.duplicates)+' כפילויות הוסרו'):''):'עדיין לא הוזנו נמענים';
- $('c-invalid').hidden=!r.invalid.length;$('c-invalid').textContent=r.invalid.length?(r.invalid.length===1?'מספר לא תקין שלא יישלח: ':nf.format(r.invalid.length)+' מספרים לא תקינים שלא יישלחו: ')+r.invalid.slice(0,6).join(', ')+(r.invalid.length>6?'…':''):'';
+ $('c-invalid').hidden=!r.invalid.length;$('c-invalid-text').textContent=r.invalid.length?(r.invalid.length===1?'מספר לא תקין שלא יישלח: ':nf.format(r.invalid.length)+' מספרים לא תקינים שלא יישלחו: ')+r.invalid.slice(0,4).map(function(x){return x.value;}).join(', ')+(r.invalid.length>4?'…':''):'';
  $('c-count').textContent=body.length?nf.format(body.length)+' / 1,000 תווים · '+seg+' SMS לנמען':'';
  $('c-optout').hidden=!(n>1&&ME.settings.optout_text);$('c-optout').textContent='בשליחה לכמה נמענים יתווסף בסוף ההודעה: '+ME.settings.optout_text;
  $('c-usage').textContent=ME.daily_limit===null?'':'נוצלו '+nf.format(ME.sent_24h)+' מתוך '+nf.format(ME.daily_limit)+' ב-24 השעות האחרונות';
@@ -478,13 +499,14 @@ function composeError(text){$('c-error').hidden=false;$('c-error').textContent=t
 function pickColumn(){const pc=phoneColumn(C.rows);const sel=$('c-column');sel.replaceChildren();
  for(let c=0;c<pc.width;c++){const o=el('option','',(pc.header&&C.rows[0][c]?C.rows[0][c]:'עמודה '+(c+1))+(pc.scores[c]?' ('+pc.scores[c]+')':''));o.value=String(c);sel.append(o);}
  sel.value=String(pc.best);applyColumn();}
-function applyColumn(){const c=Number($('c-column').value);const header=C.rows.length>1&&!normalize(C.rows[0][c]||'');
- C.imported=C.rows.slice(header?1:0).map(function(r){return r[c]||'';}).filter(function(v){return v.trim();});
+function applyColumn(){const c=Number($('c-column').value);const first=String(C.rows[0][c]||'');const header=C.rows.length>1&&/[A-Za-z֐-׿]/.test(first)&&!normalize(first);
+ C.imported=[];for(let i=header?1:0;i<C.rows.length;i++){const v=String(C.rows[i][c]||'').trim();if(v)C.imported.push({row:i+1,value:v});}
  $('c-import').hidden=false;$('c-import-info').textContent=C.file+' · '+nf.format(C.imported.length)+' שורות';edited();}
 $('c-file').addEventListener('change',async function(){const f=this.files&&this.files[0];this.value='';if(!f)return;$('c-error').hidden=true;
  if(f.size>5242880){composeError('הקובץ גדול מדי (עד 5MB)');return;}
  try{const r=await readRows(f);if(!r.length)throw new Error('הקובץ ריק');C.rows=r;C.file=f.name;pickColumn();}catch(e){composeError('לא ניתן לקרוא את הקובץ: '+(e.message||e));}});
 $('c-column').addEventListener('change',applyColumn);
+$('c-invalid-more').addEventListener('click',function(){const r=recipients();showReport('מספרים שלא יישלחו',plural(r.list.length,'נמען תקין אחד','נמענים תקינים')+' · '+plural(r.invalid.length,'ערך אחד לא יישלח','ערכים לא יישלחו'),r.invalid);});
 $('c-import-clear').addEventListener('click',function(){C.rows=null;C.imported=[];$('c-import').hidden=true;edited();});
 $('c-save-list').addEventListener('click',function(){const r=recipients();if(!r.list.length){composeError('אין נמענים לשמירה');return;}$('compose').close();editList(null,r.list);});
 for(const id of ['c-to','c-body'])$(id).addEventListener('input',edited);

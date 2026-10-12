@@ -82,7 +82,7 @@ const body = header('admin',false) + String.raw`
  <nav class="tabs" role="tablist" aria-label="ניהול"><button type="button" role="tab" data-tab="users">משתמשים</button><button type="button" role="tab" data-tab="numbers">מספרים</button><button type="button" role="tab" data-tab="contacts">אנשי קשר</button><button type="button" role="tab" data-tab="optouts">רשימת הסרה</button><button type="button" role="tab" data-tab="imports">ייבוא הודעות</button><button type="button" role="tab" data-tab="settings">הגדרות</button><button type="button" role="tab" data-tab="audit">יומן פעולות</button></nav>
  <div class="banner panel" id="error" role="alert" hidden><span id="error-text"></span></div>
  <section class="panel" data-panel="users" hidden>
-  <div class="toolbar"><label class="field search">`+svg('search')+String.raw`<input id="u-q" type="search" placeholder="חיפוש לפי שם או אימייל" aria-label="חיפוש משתמשים"></label><button type="button" class="btn end" id="u-add">`+svg('plus')+String.raw`הוספת משתמש</button></div>
+  <div class="toolbar"><label class="field search">`+svg('search')+String.raw`<input id="u-q" type="search" placeholder="חיפוש לפי שם או אימייל" aria-label="חיפוש משתמשים"></label><span class="hint end" id="u-access" hidden></span><button type="button" class="ghost" id="u-access-sync" hidden>סנכרון עם Cloudflare</button><button type="button" class="btn" id="u-add">`+svg('plus')+String.raw`הוספת משתמש</button></div>
   <div class="table-wrap"><table class="list"><thead><tr><th><span>משתמש</span></th><th><span>תפקיד</span></th><th><span>מספרים</span></th><th><span>שליחה מרובה</span></th><th><span>נשלחו ב-24 שעות</span></th><th><span>כניסה אחרונה</span></th><th><span>סטטוס</span></th></tr></thead><tbody id="u-rows"></tbody></table></div>
  </section>
  <section class="panel" data-panel="numbers" hidden>
@@ -124,7 +124,7 @@ const body = header('admin',false) + String.raw`
 `+userDialog;
 const script = String.raw`
 const TABS=['users','numbers','contacts','optouts','imports','settings','audit'];
-const ACTIONS={'user.create':'משתמש נוסף','user.update':'משתמש עודכן','user.delete':'משתמש נמחק','number.create':'מספר נוסף','number.update':'מספר עודכן','settings.update':'ההגדרות עודכנו','optout.add':'נוספו לרשימת ההסרה','optout.remove':'הוסר מרשימת ההסרה','send':'שליחת הודעה','export':'ייצוא הודעות','user.disconnect':'ניתוק משתמש','user.logout':'התנתקות','messages.import':'ייבוא הודעות','messages.import.undo':'ביטול ייבוא הודעות','contact.save':'איש קשר נשמר','contact.delete':'איש קשר נמחק','contacts.import':'ייבוא אנשי קשר','list.save':'רשימת תפוצה נשמרה','list.delete':'רשימת תפוצה נמחקה'};
+const ACTIONS={'user.create':'משתמש נוסף','user.update':'משתמש עודכן','user.delete':'משתמש נמחק','number.create':'מספר נוסף','number.update':'מספר עודכן','settings.update':'ההגדרות עודכנו','optout.add':'נוספו לרשימת ההסרה','optout.remove':'הוסר מרשימת ההסרה','send':'שליחת הודעה','export':'ייצוא הודעות','user.disconnect':'ניתוק משתמש','user.logout':'התנתקות','access.sync':'סנכרון Cloudflare Access','messages.import':'ייבוא הודעות','messages.import.undo':'ביטול ייבוא הודעות','contact.save':'איש קשר נשמר','contact.delete':'איש קשר נמחק','contacts.import':'ייבוא אנשי קשר','list.save':'רשימת תפוצה נשמרה','list.delete':'רשימת תפוצה נמחקה'};
 const SEND_STATUS={accepted:'התקבלה',rejected:'נדחתה',unknown:'לא ידוע',sending:'בשליחה'};
 let USERS=[],NUMBERS=[],SETTINGS=null,OPTOUTS=[],CONTACTS=[],auditBefore=null,importRows=null,importMode='update';
 function error(e){$('error').hidden=false;$('error-text').textContent=message(e);}
@@ -139,7 +139,13 @@ for(const b of document.querySelectorAll('[data-close]'))b.addEventListener('cli
 // Connected: seen in the last two minutes and not disconnected since.
 function online(u){return u.active&&u.last_seen_at&&Date.now()-u.last_seen_at<120000&&!(u.sessions_revoked_at&&u.sessions_revoked_at>u.last_seen_at);}
 
-async function loadUsers(){const r=await Promise.all([get('/api/admin/users'),get('/api/admin/numbers'),get('/api/admin/settings')]);USERS=r[0].users;NUMBERS=r[1].numbers;SETTINGS=r[2];renderUsers();}
+async function loadUsers(){const r=await Promise.all([get('/api/admin/users'),get('/api/admin/numbers'),get('/api/admin/settings')]);USERS=r[0].users;NUMBERS=r[1].numbers;SETTINGS=r[2];renderUsers();renderAccess(r[0].access);}
+// Cloudflare Access sync: the last result, and a manual sync for when an automatic one failed.
+function renderAccess(a){const on=!!(a&&a.configured);$('u-access').hidden=$('u-access-sync').hidden=!on;if(!on)return;const l=a.last;
+ $('u-access').textContent=!l?'Cloudflare Access: עדיין לא סונכרן':l.ok?'Cloudflare Access סונכרן '+shortFmt.format(l.at)+' · '+plural(l.emails,'משתמש אחד','משתמשים'):'סנכרון Cloudflare Access נכשל ('+shortFmt.format(l.at)+'): '+l.error;$('u-access').className='hint end'+(l&&!l.ok?' bad':'');}
+// Reports a failed automatic sync after a user change; the change itself was saved.
+function accessResult(done,a){if(a&&!a.ok)toast(done+', אבל העדכון ב-Cloudflare Access נכשל: '+a.error);else toast(done+(a&&a.ok?' · Cloudflare Access עודכן':''));}
+$('u-access-sync').addEventListener('click',async function(){const b=this;b.disabled=true;try{const d=await post('/api/admin/users/access-sync',{});accessResult('הסנכרון הסתיים',d.access);await loadUsers();}catch(err){error(err);}finally{b.disabled=false;}});
 function renderUsers(){const q=$('u-q').value.trim().toLowerCase();const body=$('u-rows');body.replaceChildren();
  for(const u of USERS){if(q&&(u.name+' '+u.email).toLowerCase().indexOf(q)<0)continue;const admin=u.role==='admin';const tr=el('tr','click');tr.tabIndex=0;tr.dataset.email=u.email;
   const who=el('td');who.append(el('span','',u.name||u.email));if(u.name)who.append(el('span','sub-line',u.email));
@@ -168,15 +174,15 @@ $('ud-form').addEventListener('submit',async function(e){e.preventDefault();cons
  const test=$('ud-test').value.trim();if(test&&!normalize(test)){dlgError('ud-error',new Error('מספר הבדיקה אינו תקין'));return;}
  const numbers=[];for(const s of $('ud-perms').querySelectorAll('select'))if(s.value)numbers.push({number:s.dataset.number,can_send:s.value==='send'});
  $('ud-save').disabled=true;
- try{await post('/api/admin/users/save',{create:!editing,email:$('ud-email').value.trim(),name:$('ud-name').value,role:$('ud-role').value,active:$('ud-active').checked,can_bulk_send:$('ud-bulk').checked,can_edit_contacts:$('ud-contacts').checked,daily_limit:limit===''?null:Number(limit),test_number:test?normalize(test):null,numbers:numbers});
-  $('user-dlg').close();toast(editing?'המשתמש עודכן':'המשתמש נוסף');await loadUsers();}
+ try{const d=await post('/api/admin/users/save',{create:!editing,email:$('ud-email').value.trim(),name:$('ud-name').value,role:$('ud-role').value,active:$('ud-active').checked,can_bulk_send:$('ud-bulk').checked,can_edit_contacts:$('ud-contacts').checked,daily_limit:limit===''?null:Number(limit),test_number:test?normalize(test):null,numbers:numbers});
+  $('user-dlg').close();accessResult(editing?'המשתמש עודכן':'המשתמש נוסף',d.access);await loadUsers();}
  catch(err){dlgError('ud-error',err);}finally{$('ud-save').disabled=false;}});
 $('ud-delete').addEventListener('click',async function(){const email=$('ud-email').value;$('user-dlg').close();
  if(!await confirmAction('מחיקת משתמש','למחוק את '+email+'? הגישה שלו תיחסם מיד. הודעות שהוא שלח יישארו בטבלה.','מחיקה'))return;
- try{await post('/api/admin/users/delete',{email:email});toast('המשתמש נמחק');await loadUsers();}catch(err){error(err);}});
+ try{const d=await post('/api/admin/users/delete',{email:email});accessResult('המשתמש נמחק',d.access);await loadUsers();}catch(err){error(err);}});
 $('ud-disconnect').addEventListener('click',async function(){const email=$('ud-email').value;$('user-dlg').close();
  const a=await confirmAction('ניתוק משתמש','לנתק את '+email+'? החיבור הנוכחי שלו יסתיים מיד והוא יצטרך להתחבר מחדש עם קוד חד-פעמי.','ניתוק','וגם להשבית את המשתמש, כדי שלא יוכל להתחבר שוב');if(!a)return;
- try{await post('/api/admin/users/disconnect',{email:email,disable:a.checked});toast(a.checked?'המשתמש נותק והושבת':'המשתמש נותק');await loadUsers();}catch(err){error(err);}});
+ try{const d=await post('/api/admin/users/disconnect',{email:email,disable:a.checked});accessResult(a.checked?'המשתמש נותק והושבת':'המשתמש נותק',d.access);await loadUsers();}catch(err){error(err);}});
 
 async function loadNumbers(){NUMBERS=(await get('/api/admin/numbers')).numbers;const body=$('n-rows');body.replaceChildren();
  for(const n of NUMBERS){const tr=el('tr','click');tr.tabIndex=0;tr.dataset.number=n.number;const status=el('td');status.append(el('span','tag'+(n.active?'':' off'),n.active?'פעיל':'מושבת'));
@@ -221,11 +227,14 @@ $('c-file').addEventListener('change',async function(){const f=this.files&&this.
  catch(err){error(err);}});
 for(const b of document.querySelectorAll('[data-mode]'))b.addEventListener('click',function(){importMode=b.dataset.mode;for(const x of document.querySelectorAll('[data-mode]'))x.setAttribute('aria-pressed',String(x===b));});
 $('ci-form').addEventListener('submit',async function(e){e.preventDefault();if(!importRows)return;const phoneCol=Number($('ci-phone').value);const map=Array.from($('ci-fields').querySelectorAll('select')).filter(function(s){return s.value!=='';}).map(function(s){return [s.dataset.field,Number(s.value)];});
- const rows=importRows.slice($('ci-header').checked?1:0).filter(function(r){return String(r[phoneCol]||'').trim();}).map(function(r){const data={};for(const m of map)data[m[0]]=r[m[1]]||'';return {number:r[phoneCol],data:data};});
- if(!rows.length){dlgError('ci-error',new Error('לא נמצאו שורות עם מספר טלפון'));return;}
+ const rows=[],problems=[];
+ for(let i=$('ci-header').checked?1:0;i<importRows.length;i++){const r=importRows[i];const raw=String(r[phoneCol]||'').trim();if(!raw)continue;const p=parsePhone(raw);
+  if(!p.number){problems.push({row:i+1,value:raw,reason:PHONE_PROBLEMS[p.problem]});continue;}const data={};for(const m of map)data[m[0]]=r[m[1]]||'';rows.push({number:p.number,data:data});}
+ if(!rows.length){if(problems.length)showReport('שורות שלא יובאו','אף שורה לא יובאה.',problems);else dlgError('ci-error',new Error('לא נמצאו שורות עם מספר טלפון'));return;}
  $('ci-go').disabled=true;$('ci-bar').hidden=false;let imported=0,invalid=0;
  try{for(let i=0;i<rows.length;i+=1000){const d=await post('/api/admin/contacts/import',{mode:importMode,rows:rows.slice(i,i+1000)});imported+=d.imported;invalid+=d.invalid;$('ci-progress').style.width=Math.min(100,(i+1000)/rows.length*100)+'%';$('ci-status').textContent='יובאו '+nf.format(imported);}
-  $('ci-dlg').close();toast(plural(imported,'יובא איש קשר אחד','אנשי קשר יובאו')+(invalid?' · '+plural(invalid,'שורה אחת עם מספר לא תקין','שורות עם מספר לא תקין'):''));await loadContacts();}
+  $('ci-dlg').close();invalid+=problems.length;const summary=plural(imported,'יובא איש קשר אחד','אנשי קשר יובאו')+(invalid?' · '+plural(invalid,'שורה אחת עם מספר לא תקין','שורות עם מספר לא תקין'):'');
+  if(problems.length)showReport('שורות שלא יובאו',summary,problems);else toast(summary);await loadContacts();}
  catch(err){dlgError('ci-error',err);}finally{$('ci-go').disabled=false;}});
 
 // Message import. The browser maps columns, parses dates in Israel time and shows a preview; the server validates
@@ -271,7 +280,7 @@ function miParse(){const map={};for(const s of $('mi-map').querySelectorAll('sel
  const out=[],bad=[],seen=new Map();const fallback=$('mi-sn').value;
  for(let i=$('mi-header').checked?1:0;i<MI.rows.length;i++){const r=MI.rows[i];if(!r.some(function(x){return String(x||'').trim();}))continue;
   const cellv=function(f){return map[f]===''||map[f]===undefined?'':String(r[Number(map[f])]||'').trim();};
-  try{if(map.peer===''||map.body==='')throw 'יש לבחור את עמודות הטלפון וההודעה';const peer=normalize(cellv('peer'));if(!peer)throw 'מספר הלקוח אינו תקין';
+  try{if(map.peer===''||map.body==='')throw 'יש לבחור את עמודות הטלפון וההודעה';const pp=parsePhone(cellv('peer'));if(!pp.number)throw 'מספר הלקוח: '+PHONE_PROBLEMS[pp.problem];const peer=pp.number;
    const body=String(r[Number(map.body)]||'');if(!body.trim())throw 'ההודעה ריקה';if(body.length>10000)throw 'ההודעה ארוכה מדי';
    const raw=cellv('sn');const sn=raw?normalize(raw):fallback;if(!sn)throw raw?'מספר המערכת אינו תקין':'לא נבחר מספר מערכת';if(!active.has(sn))throw 'מספר המערכת אינו רשום או אינו פעיל';
    const dir=miDir(cellv('dir'));if(!dir)throw 'כיוון לא מזוהה';const status=dir==='out'?miStatus(cellv('status')):null;if(dir==='out'&&!status)throw 'סטטוס לא מזוהה';
@@ -343,6 +352,7 @@ function details(action,raw){if(!raw)return '';let d;try{d=JSON.parse(raw);}catc
  if(action==='send')return (d.test?'בדיקה · ':'')+nf.format(d.recipients)+' נמענים · '+(SEND_STATUS[d.status]||d.status);
  if(action==='export')return (d.format==='csv'?'CSV':'Excel')+' · '+nf.format((d.columns||[]).length)+' עמודות'+(d.filters&&Object.keys(d.filters).length?' · עם סינון':'');
  if(action==='user.disconnect')return d.disable?'נותק והושבת':'נותק';
+ if(action==='access.sync')return d.ok?plural(d.emails,'משתמש אחד','משתמשים'):'נכשל: '+d.error;
  if(action==='messages.import')return d.file+' · '+nf.format(d.total)+' שורות';
  if(action==='messages.import.undo')return plural(d.removed,'הודעה אחת הוסרה','הודעות הוסרו');
  if(action==='contact.save'&&d.fields)return nf.format(d.fields.length)+' שדות';

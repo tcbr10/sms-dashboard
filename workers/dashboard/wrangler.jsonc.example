@@ -5,7 +5,8 @@
   "compatibility_date": "2026-08-06",
   "workers_dev": false,
   "preview_urls": false,
-  "vars": {"ACCESS_ISSUER": "https://REPLACE_WITH_TEAM.cloudflareaccess.com", "ACCESS_AUD": "REPLACE_WITH_ACCESS_APPLICATION_AUD"},
+  "vars": {"ACCESS_ISSUER": "https://REPLACE_WITH_TEAM.cloudflareaccess.com", "ACCESS_AUD": "REPLACE_WITH_ACCESS_APPLICATION_AUD", "ACCESS_ACCOUNT_ID": "REPLACE_WITH_ACCOUNT_ID", "ACCESS_POLICY_ID": "REPLACE_WITH_SYNCED_ACCESS_POLICY_ID"}
+  // Access sync also needs the secret CF_API_TOKEN (Access: Apps and Policies - Edit); without it, user changes are not synced.,
   // A hostname in a zone of the same Cloudflare account, protected by a Cloudflare Access application.
   "routes": [{"pattern": "REPLACE_WITH_DASHBOARD_HOSTNAME", "custom_domain": true}],
   "d1_databases": [{"binding": "DB", "database_name": "sms-dashboard", "database_id": "REPLACE_WITH_D1_DATABASE_ID", "migrations_dir": "../../migrations"}]
