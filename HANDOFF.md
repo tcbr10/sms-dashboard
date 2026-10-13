@@ -16,10 +16,10 @@ The README documents setup, routes, field mapping and operations in detail.
 | Area | State |
 | --- | --- |
 | Code | `main` is pushed to GitHub. CI runs typecheck and tests on every push. |
-| Dashboard | Deployed (version `d10ff350`): webhook forwarding and bot tabs, number parsing with import reports, Access sync (token set, working), message import, read-usage fix, typed recent-hours filter, table with column choice and header filters (including hours), profile menu with sign-out, contact editing by users, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
-| Ingest | Deployed (version `45db2a57`) with the two-secret auth, opt-out detection, bot replies, webhook forwarding and an every-minute cron for delivery retries. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
+| Dashboard | Deployed (version `e44799aa`): per-number bot reply method, webhook forwarding and bot tabs, number parsing with import reports, Access sync (token set, working), message import, read-usage fix, typed recent-hours filter, table with column choice and header filters (including hours), profile menu with sign-out, contact editing by users, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
+| Ingest | Deployed (version `166be7a2`) with bot replies through the response or Micropay's API, the two-secret auth, opt-out detection, bot replies, webhook forwarding and an every-minute cron for delivery retries. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
-| D1 | `0001` to `0007` applied. On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
+| D1 | `0001` to `0008` applied. On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
 | Outgoing logging | Not wired yet. Nothing posts to `/events/outgoing`, so the dashboard shows incoming messages only. |
 
 ## Local-only state on the owner's machine
@@ -162,8 +162,8 @@ Order matters: the migration must exist before code that uses it, and the Access
 
 Found on 2026-10-13: messages on the bot's number come from a Micropay automation, whose HTTP step discards the webhook's answer, so bot replies were logged but never sent. Micropay doesn't allow an automation and a Dynamic Text service on the same number.
 
-1. Apply `0008` (`npm run db:migrate`) **before** deploying ingest, because ingest reads `system_numbers.bot_reply`.
-2. Deploy ingest, then the dashboard.
+1. Done: applied `0008` before deploying ingest.
+2. Done: deployed ingest, then the dashboard.
 3. The owner adds the Micropay API token to ingest: `npx wrangler secret put MICROPAY_TOKEN --config workers/ingest/wrangler.jsonc` (the same token the dashboard uses).
 4. On the numbers tab, set the bot number's "תשובות הבוט נשלחות" to "דרך ממשק השליחה".
 
