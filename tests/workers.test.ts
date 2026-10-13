@@ -35,6 +35,19 @@ describe('documented Micropay callbacks',()=>{
  it('requires dest to be a registered system number',async()=>{expect((await ingestion.fetch(callback('json',{dest:'0501234569'}),env)).status).toBe(403);const p={origsms:message,phone:'0509876543',msgid:'missing-dest'};expect((await ingestion.fetch(new Request('https://ingest.test/hooks/micropay/incoming',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(p)}),env)).status).toBe(400);expect((await ingestion.fetch(callback('json',{dest:'0501234568'}),env)).status).toBe(200);expect((await read('bob@example.com')).messages.map(m=>m.system_number)).toEqual([other]);});
  it('never returns success when storage fails',async()=>{const broken={...env,DB:{prepare(){throw new Error('storage unavailable');}} as unknown as D1Database};expect((await ingestion.fetch(callback(),broken)).status).toBe(503);expect((await ingestion.fetch(new Request('https://ingest.test/hooks/incoming',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({system_number:number,peer_number:peer,body:message})}),broken)).status).toBe(503);});
 });
+describe('Micropay automation JSON templates',()=>{
+ const post=(raw:string)=>ingestion.fetch(new Request('https://ingest.test/hooks/micropay/incoming',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:raw}),env);
+ const tpl=(origsms:string,msgid:string,order:'normal'|'body-last'='normal')=>order==='normal'?'{"origsms":"'+origsms+'","phone":"0509876543","dest":"0501234567","msgid":"'+msgid+'"}':'{\n  "msgid": "'+msgid+'",\n  "phone": "0509876543",\n  "dest": "0501234567",\n  "origsms": "'+origsms+'"\n}';
+ const bodies=async()=>(await read('alice@example.com')).messages.map(m=>m.body).reverse();
+ it('accepts messages pasted in unescaped, with line breaks, tabs or quotes',async()=>{
+  expect((await post(tpl('316233436\nמצפה רמון\nמצפה רמון','a1'))).status).toBe(200);
+  expect((await post(tpl('שורה\r\nשנייה\tטאב','a2','body-last'))).status).toBe(200);
+  expect((await post(tpl('הוא אמר "כן", ואז הלך\nלבית','a3'))).status).toBe(200);
+  expect((await post(tpl('escaped \\"ok\\" \\n stays','a4'))).status).toBe(200);
+  expect(await bodies()).toEqual(['316233436\nמצפה רמון\nמצפה רמון','שורה\r\nשנייה\tטאב','הוא אמר "כן", ואז הלך\nלבית','escaped "ok" \n stays']);});
+ it('still refuses what is not a Micropay object',async()=>{expect((await post('not json')).status).toBe(400);expect((await post('{"origsms":"x"')).status).toBe(400);expect((await post('{"phone":"1","phone":"2"}')).status).toBe(400);
+  expect((await post('{"origsms":"a\nb","phone":"0509876543","dest":"0501234567"}')).status).toBe(400);});
+});
 describe('authorization',()=>{
  beforeEach(async()=>{await send({});await env.DB.prepare('INSERT INTO messages(event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').bind('other','in',other,peer,'sales',1,1,'receipt',1).run();});
  it('supports multiple assignments, shared numbers and empty users',async()=>{expect((await read('alice@example.com')).messages).toHaveLength(2);expect((await read('bob@example.com')).messages.map(m=>m.system_number)).toEqual([other]);expect((await read('shared@example.com')).messages.map(m=>m.system_number)).toEqual([number]);expect((await read('none@example.com')).messages).toHaveLength(0);});

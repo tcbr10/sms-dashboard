@@ -48,7 +48,7 @@ Treat the Micropay callback URL as a secret, since anything that records full UR
 
 ## Documented incoming callback
 
-Dedicated route: GET or POST /hooks/micropay/incoming. POST accepts application/json or application/x-www-form-urlencoded. GET and forms must URL-encode free text; JSON must not URL-encode it. Bodies and GET query data are limited to 32 KiB. Duplicate form/query parameters, invalid encoding and mixed normalized/provider fields are rejected.
+Dedicated route: GET or POST /hooks/micropay/incoming. POST accepts application/json or application/x-www-form-urlencoded. GET and forms must URL-encode free text; JSON must not URL-encode it. Bodies and GET query data are limited to 32 KiB. Duplicate form/query parameters, invalid encoding and mixed normalized/provider fields are rejected. Micropay automations build the JSON from a template and paste the message in unescaped, so multi-line messages (and messages with quotes) arrive as invalid JSON; this route escapes raw control characters inside strings and, if quotes still break the object, reads the known Micropay fields by name. Other routes keep strict JSON.
 
 Field mapping:
 
