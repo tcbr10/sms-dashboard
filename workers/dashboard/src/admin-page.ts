@@ -53,6 +53,8 @@ const userDialog = String.raw`
  <div class="grid2"><label class="fld"><span>מספר</span><input id="nd-number" class="phone" required maxlength="20" placeholder="05X-XXX-XXXX"></label><label class="fld"><span>שם תצוגה</span><input id="nd-label" required maxlength="40"></label></div>
  <label class="check"><input type="checkbox" id="nd-active">מספר פעיל</label>
  <p class="hint" id="nd-note"></p>
+ <label class="fld"><span>תשובות הבוט נשלחות</span><select id="nd-bot"><option value="response">כתשובה ל-Webhook (שירות טקסט דינמי)</option><option value="api">דרך ממשק השליחה (הודעות שמגיעות מאוטומציה)</option></select></label>
+ <p class="hint">מיקרופיי שולח את התשובה שמוחזרת ל-Webhook רק בשירות טקסט דינמי. כשההודעות למספר מגיעות מאוטומציה, יש לבחור "דרך ממשק השליחה".</p>
  <div class="banner" id="nd-error" role="alert" hidden></div>
  <div class="dialog-foot"><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn">שמירה</button></div>
 </form></dialog>
@@ -238,7 +240,7 @@ async function loadNumbers(){NUMBERS=(await get('/api/admin/numbers')).numbers;c
   tr.append(cell(n.label),cell(local(n.number),'phone'),status,cell(nf.format(n.users)));body.append(tr);}
  if(!NUMBERS.length){const tr=el('tr');const td=cell('עדיין לא הוגדרו מספרים','muted');td.colSpan=4;tr.append(td);body.append(tr);}}
 function openNumber(number){const n=number?NUMBERS.find(function(x){return x.number===number;}):null;$('nd-title').textContent=n?'עריכת מספר':'מספר חדש';
- $('nd-number').value=n?local(n.number):'';$('nd-number').readOnly=!!n;$('nd-label').value=n?n.label:'';$('nd-active').checked=n?!!n.active:true;$('nd-error').hidden=true;activeNote();$('num-dlg').showModal();(n?$('nd-label'):$('nd-number')).focus();}
+ $('nd-number').value=n?local(n.number):'';$('nd-number').readOnly=!!n;$('nd-label').value=n?n.label:'';$('nd-active').checked=n?!!n.active:true;$('nd-bot').value=n&&n.bot_reply||'response';$('nd-error').hidden=true;activeNote();$('num-dlg').showModal();(n?$('nd-label'):$('nd-number')).focus();}
 function activeNote(){$('nd-note').textContent=$('nd-active').checked?'':'מספר מושבת מוסתר מכל המשתמשים, והודעות נכנסות אליו נדחות. מיקרופיי עשוי לשלוח ללקוח הודעת שגיאה.';$('nd-note').className='hint'+($('nd-active').checked?'':' bad');}
 $('nd-active').addEventListener('change',activeNote);
 $('n-add').addEventListener('click',function(){openNumber(null);});
@@ -246,7 +248,7 @@ $('n-rows').addEventListener('click',function(e){const tr=e.target.closest('tr[d
 $('n-rows').addEventListener('keydown',function(e){if((e.key==='Enter'||e.key===' ')&&e.target.dataset.number){e.preventDefault();openNumber(e.target.dataset.number);}});
 $('nd-form').addEventListener('submit',async function(e){e.preventDefault();const editing=$('nd-number').readOnly;const number=normalize($('nd-number').value);
  if(!number){dlgError('nd-error',new Error('מספר הטלפון אינו תקין'));return;}
- try{await post('/api/admin/numbers/save',{create:!editing,number:number,label:$('nd-label').value,active:$('nd-active').checked});$('num-dlg').close();toast(editing?'המספר עודכן':'המספר נוסף');await loadNumbers();}
+ try{await post('/api/admin/numbers/save',{create:!editing,number:number,label:$('nd-label').value,active:$('nd-active').checked,bot_reply:$('nd-bot').value});$('num-dlg').close();toast(editing?'המספר עודכן':'המספר נוסף');await loadNumbers();}
  catch(err){dlgError('nd-error',err);}});
 
 async function loadContacts(){const r=await Promise.all([get('/api/admin/contacts?q='+encodeURIComponent($('c-q').value.trim())),SETTINGS?Promise.resolve(SETTINGS):get('/api/admin/settings')]);CONTACTS=r[0].contacts;SETTINGS=r[1];renderContacts(r[0].total);}

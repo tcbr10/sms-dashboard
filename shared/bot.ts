@@ -35,7 +35,9 @@ function saveField(env: Env, peer: string, field: string, value: string, now: nu
 
 // Decides the bot's reply to a newly stored incoming message (or null for none) and records the answer and new state.
 // A repeated webhook call for the same message returns the reply already sent, without moving the conversation.
-export async function handleIncoming(env: Env, m: {id:number;inserted:boolean;system:string;peer:string;body:string}): Promise<string|null> {
+// status is how the reply is logged: 'accepted' when it goes back as the webhook's answer, 'pending' when the caller
+// sends it through Micropay's API afterwards.
+export async function handleIncoming(env: Env, m: {id:number;inserted:boolean;system:string;peer:string;body:string}, status: 'accepted'|'pending' = 'accepted'): Promise<string|null> {
  const key = JSON.stringify(['out', 'bot:' + m.id]);
  if (!m.inserted) return (await env.DB.prepare('SELECT body FROM messages WHERE event_key=?').bind(key).first<{body:string}>())?.body ?? null;
  const now = Date.now();
@@ -69,8 +71,8 @@ export async function handleIncoming(env: Env, m: {id:number;inserted:boolean;sy
   const start = flows.find(f => f.trigger === 'keyword' && f.keyword && [text, first].includes(normalizeReply(f.keyword))) ?? flows.find(f => f.trigger === 'any');
   if (start?.steps.length) { reply = start.steps[0].text; writes.push(enter(env, start, start.steps[0], m.system, m.peer, now)); }
  }
- // The reply is logged as an outgoing message from the bot; Micropay sends it as the answer to its webhook.
- if (reply) writes.push(env.DB.prepare("INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,updated_at,sent_by) VALUES (?,'out',?,?,?,?,?,'workflow','accepted',?,?) ON CONFLICT(event_key) DO NOTHING").bind(key, m.system, m.peer, reply, now, now, now, BOT_SENDER));
+ // The reply is logged as an outgoing message from the bot.
+ if (reply) writes.push(env.DB.prepare("INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,updated_at,sent_by) VALUES (?,'out',?,?,?,?,?,'workflow',?,?,?) ON CONFLICT(event_key) DO NOTHING").bind(key, m.system, m.peer, reply, now, now, status, now, BOT_SENDER));
  if (writes.length) await env.DB.batch(writes);
  return reply;
 }

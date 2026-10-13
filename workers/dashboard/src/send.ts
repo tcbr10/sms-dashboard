@@ -1,12 +1,9 @@
 import {Env,HttpError,json,phone,readBody,recipient,text} from '../../../shared/validation';
 import {loadSettings} from '../../../shared/settings';
-import {micropaySubmission,SubmissionResult} from '../../../shared/micropay-submission';
+import {sendMicropay} from '../../../shared/micropay-send';
 import {User,audit,sentLast24h} from './users';
 import {enterMany,loadFlow} from '../../../shared/bot';
 export type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
-const MICROPAY_SEND = 'https://www.micropay.co.il/extApi/scheduleSms.php';
-// Micropay's examples use local Israeli numbers; other countries go as digits with the country code.
-const micropayNumber = (n: string) => n.startsWith('+972') ? '0' + n.slice(4) : n.slice(1);
 // Sends one message to one or more recipients. The client-generated ID makes retries and double clicks safe:
 // an ID that was already used returns the earlier result and never calls Micropay again. A test send goes to exactly
 // one number and, with bulk_preview, carries the opt-out text exactly as the multi-recipient send would.
@@ -39,12 +36,8 @@ export async function send(request: Request, env: Env, user: User, fetcher: Fetc
  const now = Date.now();
  const claim = await env.DB.prepare("INSERT INTO sends (id,email,system_number,body,recipients,status,created_at,is_test) VALUES (?,?,?,?,?,'sending',?,?) ON CONFLICT(id) DO NOTHING").bind(id,user.email,system,message,recipients.length,now,test?1:0).run();
  if (!claim.meta.changes) return json({id,status:'sending',sent:recipients.length,duplicate:true});
- let result: SubmissionResult = {submission_status:'unknown'}; let error: string|null = null;
- try {
-  const response = await fetcher(MICROPAY_SEND,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:env.MICROPAY_TOKEN,from:micropayNumber(system),msg:message.replace(/\r?\n/g,'\r\n'),list:recipients.map(micropayNumber).join(','),desc:(test?'sms-dashboard test ':'sms-dashboard ')+user.email}),signal:AbortSignal.timeout(25000)});
-  const raw = (await response.text()).slice(0,2000); if (response.ok) result = micropaySubmission(raw); if (result.submission_status !== 'accepted') error = ('HTTP '+response.status+' '+raw).slice(0,300);
- } catch { error = 'Micropay did not answer in time; the message may or may not have been sent'; }
- const status = result.submission_status;
+ const result = await sendMicropay(fetcher,env.MICROPAY_TOKEN,{from:system,to:recipients,body:message,desc:(test?'sms-dashboard test ':'sms-dashboard ')+user.email});
+ const {error} = result; const status = result.submission_status;
  // Never retried automatically: an unknown result may still have been sent.
  await env.DB.batch([
   env.DB.prepare(`INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,provider_message_id,updated_at,sent_by,send_id) SELECT json_array('out','send:'||?1||':'||value),'out',?2,value,?3,?4,?4,'workflow',?5,NULL,?4,?6,?1 FROM json_each(?7) WHERE true ON CONFLICT(event_key) DO NOTHING`).bind(id,system,message,now,status,user.email,JSON.stringify(recipients)),

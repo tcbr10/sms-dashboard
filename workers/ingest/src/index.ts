@@ -3,6 +3,7 @@ import {readMicropay, micropayAcknowledgement} from './micropay';
 import {DEFAULT_SETTINGS, isOptOut} from '../../../shared/settings';
 import {Fetch, deliver, enqueue, runDue} from '../../../shared/forwarding';
 import {handleIncoming} from '../../../shared/bot';
+import {sendMicropay} from '../../../shared/micropay-send';
 async function equal(a: string, b: string): Promise<boolean> { const hash = async (s: string) => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))); const [x,y] = await Promise.all([hash(a),hash(b)]); let difference = 0; for (let i=0;i<x.length;i++) difference |= x[i] ^ y[i]; return difference === 0; }
 // Micropay can only be configured with a URL, so its route also accepts ?token=.
 async function authorize(request: Request, expected: string | undefined, allowQuery = false): Promise<void> {
@@ -12,7 +13,7 @@ async function authorize(request: Request, expected: string | undefined, allowQu
 }
 async function store(direction: 'in'|'out', body: Record<string, unknown>, env: Env) {
  const now = Date.now(); const system = phone(body.system_number);
- const registered = await env.DB.prepare('SELECT number FROM system_numbers WHERE number = ? AND active = 1').bind(system).first(); if (!registered) throw new HttpError(403, 'Unknown or inactive system number');
+ const registered = await env.DB.prepare('SELECT number,bot_reply FROM system_numbers WHERE number = ? AND active = 1').bind(system).first<{number:string;bot_reply:'response'|'api'}>(); if (!registered) throw new HttpError(403, 'Unknown or inactive system number');
  const peer = phone(body.peer_number); const message = text(body.body, 'body', 10000);
  const eventId = body.event_id === undefined ? (direction === 'in' ? crypto.randomUUID() : text(body.event_id,'event_id',256)) : text(body.event_id,'event_id',256);
  const key = JSON.stringify([direction,eventId]); const occurred = timestamp(body.occurred_at, now); const timeSource = body.occurred_at === undefined ? 'receipt' : direction === 'in' ? 'provider' : 'workflow';
@@ -26,9 +27,19 @@ async function store(direction: 'in'|'out', body: Record<string, unknown>, env: 
  if (stored.system_number !== system || stored.peer_number !== peer || stored.body !== message) throw new HttpError(409, 'Event ID reused with different message content');
  if (direction === 'out' && status !== stored.submission_status && status !== 'pending' && status !== 'unknown') throw new HttpError(409, 'Conflicting final submission status');
  if (direction === 'in' && message.length <= 30) await optOut(env, peer, message);
- return {response:{ok:true,id:stored.id,deduplicated_by_id:body.event_id !== undefined,submission_status:stored.submission_status},id:stored.id,inserted:written.meta.changes > 0,system,peer};
+ return {response:{ok:true,id:stored.id,deduplicated_by_id:body.event_id !== undefined,submission_status:stored.submission_status},id:stored.id,inserted:written.meta.changes > 0,system,peer,botReply:registered.bot_reply};
 }
 export type Options = {fetcher?:Fetch;waitUntil?:(promise:Promise<unknown>)=>void};
+// Sends a bot reply through Micropay's API and records the result on the logged reply. A retried webhook call never
+// gets here (only newly stored messages do), so a reply is sent at most once.
+async function botApiReply(env: Env, stored: {id:number;system:string;peer:string}, reply: string, options: Options): Promise<void> {
+ const key = JSON.stringify(['out','bot:'+stored.id]);
+ try {
+  const r = env.MICROPAY_TOKEN ? await sendMicropay(options.fetcher ?? ((u,i) => fetch(u,i)), env.MICROPAY_TOKEN, {from:stored.system,to:[stored.peer],body:reply,desc:'sms-dashboard bot'}) : {submission_status:'rejected' as const,error:'MICROPAY_TOKEN is not set on the ingest Worker'};
+  if (r.error) console.error('Bot reply via API', r.submission_status, r.error);
+  await env.DB.prepare('UPDATE messages SET submission_status=?,provider_message_id=?,updated_at=MAX(?,updated_at+1) WHERE event_key=?').bind(r.submission_status,'task_id' in r ? r.task_id ?? null : null,Date.now(),key).run();
+ } catch (error) { console.error('Bot reply via API failed', error instanceof Error ? error.message : error); }
+}
 // A newly stored incoming message is queued for every matching forwarding rule and tried after the response is sent.
 // Errors here are only logged: the message is stored, and Micropay must not see a failure.
 async function forward(env: Env, stored: {id:number;inserted:boolean;system:string;peer:string}, options: Options): Promise<void> {
@@ -51,7 +62,11 @@ export async function ingest(request: Request, env: Env, options: Options = {}):
   await authorize(request,env.INCOMING_TOKEN,true);const parsed=await readMicropay(request);
   const stored=await store('in',parsed.event,env);await forward(env,stored,options);
   // The bot's answer, if any, goes back as the reply; a bot error only means no reply, never a failed callback.
-  let reply:string|null=null;try{reply=await handleIncoming(env,{id:stored.id,inserted:stored.inserted,system:stored.system,peer:stored.peer,body:String(parsed.event.body)});}catch(error){console.error('Bot failed',error instanceof Error?error.message:error);}
+  // Numbers whose messages come from a Micropay automation can't answer through the response, so their replies go
+  // through the sending API after responding; the response then carries no reply, so nothing is sent twice.
+  const viaApi=stored.botReply==='api';let reply:string|null=null;
+  try{reply=await handleIncoming(env,{id:stored.id,inserted:stored.inserted,system:stored.system,peer:stored.peer,body:String(parsed.event.body)},viaApi?'pending':'accepted');}catch(error){console.error('Bot failed',error instanceof Error?error.message:error);}
+  if(viaApi){if(reply&&stored.inserted){const run=botApiReply(env,stored,reply,options);if(options.waitUntil)options.waitUntil(run);else await run;}return micropayAcknowledgement(parsed.json,null);}
   return micropayAcknowledgement(parsed.json,reply);
  }
  const direction = path === '/hooks/incoming' ? 'in' : path === '/events/outgoing' ? 'out' : undefined;

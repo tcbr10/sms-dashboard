@@ -27,7 +27,7 @@ export async function admin(request: Request, url: URL, env: Env, user: User, fe
  if (path === 'flows' || path.startsWith('flows/')) return flows(request,path,url,env,user);
  if (request.method === 'GET') {
   if (path === 'users') { const r = await env.DB.prepare("SELECT u.email,u.name,u.role,u.active,u.can_bulk_send,u.can_edit_contacts,u.daily_limit,u.created_at,u.last_seen_at,u.test_number,u.sessions_revoked_at,(SELECT json_group_array(json_object('number',n.system_number,'can_send',n.can_send)) FROM user_numbers n WHERE n.email=u.email) AS numbers,(SELECT COALESCE(SUM(s.recipients),0) FROM sends s WHERE s.email=u.email AND s.created_at>? AND s.status!='rejected') AS sent_24h FROM users u ORDER BY u.role,u.name,u.email").bind(Date.now()-DAY).all<Record<string,unknown>>(); return json({users:r.results.map(u => ({...u,numbers:JSON.parse(String(u.numbers))})),access:{configured:accessConfigured(env),last:await lastSync(env)}}); }
-  if (path === 'numbers') return json({numbers:(await env.DB.prepare('SELECT s.number,s.label,s.active,(SELECT COUNT(*) FROM user_numbers u WHERE u.system_number=s.number) AS users FROM system_numbers s ORDER BY s.active DESC,s.label,s.number').all()).results});
+  if (path === 'numbers') return json({numbers:(await env.DB.prepare('SELECT s.number,s.label,s.active,s.bot_reply,(SELECT COUNT(*) FROM user_numbers u WHERE u.system_number=s.number) AS users FROM system_numbers s ORDER BY s.active DESC,s.label,s.number').all()).results});
   if (path === 'settings') return json(await loadSettings(env.DB));
   if (path === 'contacts') { const q = (url.searchParams.get('q') || '').slice(0,100); const needle = q.replace(/^0/,''); const where = q ? 'WHERE instr(number,?)>0 OR EXISTS (SELECT 1 FROM json_each(data) j WHERE instr(lower(j.value),lower(?))>0)' : '';
    const [rows,count] = await Promise.all([env.DB.prepare('SELECT number,data,updated_at,updated_by FROM contacts '+where+' ORDER BY updated_at DESC,number LIMIT 300').bind(...(q?[needle,q]:[])).all<{data:string}>(),env.DB.prepare('SELECT COUNT(*) AS n FROM contacts').first<{n:number}>()]);
@@ -96,9 +96,10 @@ export async function admin(request: Request, url: URL, env: Env, user: User, fe
  }
  if (path === 'numbers/save') {
   const number = phone(body.number); const label = text(typeof body.label === 'string' ? body.label.trim() : body.label,'label',40); const active = flag(body.active,'active');
+  const botReply = body.bot_reply === undefined ? 'response' : body.bot_reply === 'api' || body.bot_reply === 'response' ? body.bot_reply : (() => { throw new HttpError(400,'Invalid bot_reply'); })();
   const exists = await env.DB.prepare('SELECT 1 FROM system_numbers WHERE number=?').bind(number).first();
   if (body.create === true && exists) throw new HttpError(409,'This number already exists'); if (body.create !== true && !exists) throw new HttpError(404,'Number not found');
-  await env.DB.batch([env.DB.prepare('INSERT INTO system_numbers (number,label,active) VALUES (?,?,?) ON CONFLICT(number) DO UPDATE SET label=excluded.label,active=excluded.active').bind(number,label,active),audit(env,user.email,body.create === true ? 'number.create' : 'number.update',number,{label,active:!!active})]);
+  await env.DB.batch([env.DB.prepare('INSERT INTO system_numbers (number,label,active,bot_reply) VALUES (?,?,?,?) ON CONFLICT(number) DO UPDATE SET label=excluded.label,active=excluded.active,bot_reply=excluded.bot_reply').bind(number,label,active,botReply),audit(env,user.email,body.create === true ? 'number.create' : 'number.update',number,{label,active:!!active,bot_reply:botReply})]);
   return json({ok:true});
  }
  if (path === 'settings') {

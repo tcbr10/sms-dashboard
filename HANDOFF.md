@@ -44,6 +44,7 @@ The README documents setup, routes, field mapping and operations in detail.
 | `workers/dashboard/src/imports.ts` | `/api/admin/imports*`: message import from spreadsheets (start, rows, undo), duplicate checks |
 | `workers/dashboard/src/access.ts` | Cloudflare Access policy sync (active users' emails) |
 | `shared/forwarding.ts` | Webhook deliveries: queue, signed request, retries (ingest cron) |
+| `shared/micropay-send.ts` | One scheduleSms call, used by dashboard sends and API bot replies |
 | `shared/bot.ts` | Bot engine: conversation state, option matching, replies, answers |
 | `workers/dashboard/src/forwards.ts` | `/api/admin/forwards*`: rules, delivery log, test, resend |
 | `workers/dashboard/src/flows.ts` | `/api/admin/flows*` (admins), `/api/bot/info` and `/api/bot/block` (users) |
@@ -53,7 +54,7 @@ The README documents setup, routes, field mapping and operations in detail.
 | `workers/dashboard/src/admin-page.ts` | Admin page |
 | `shared/validation.ts` | `Env`, phone and recipient normalization, body reading, cursors |
 | `shared/settings.ts` | Settings defaults and validation, opt-out word matching (also used by ingest) |
-| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id`; `0007_forwarding_bot.sql` forwarding rules and deliveries, bot flows, conversations, answers and blocks |
+| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id`; `0007_forwarding_bot.sql` forwarding rules and deliveries, bot flows, conversations, answers and blocks; `0008_bot_reply_via.sql` per-number bot reply method |
 | `tests/workers.test.ts` | Miniflare D1 tests: ingest, isolation, table queries, access, admin, sending (fake Micropay) |
 | `scripts/preview.ts` | Local preview with seeded data, live inserts and a fake Micropay (`npm run preview`; `PREVIEW_USER=agent@example.com` for a regular user) |
 
@@ -156,6 +157,15 @@ Order matters: the migration must exist before code that uses it, and the Access
 1. Done: applied `0007` before deploying.
 2. Done: deployed ingest (version `45db2a57`, cron `* * * * *`) (adds the bot replies and the every-minute cron trigger; the `triggers` entry is in the local `workers/ingest/wrangler.jsonc`), then the dashboard.
 3. Build flows on the "בוט" tab (they start inactive) and forwarding rules on the "העברה ל-Webhook" tab. Send a test from a forwarding rule before relying on it.
+
+## Rollout of bot replies through the API
+
+Found on 2026-10-13: messages on the bot's number come from a Micropay automation, whose HTTP step discards the webhook's answer, so bot replies were logged but never sent. Micropay doesn't allow an automation and a Dynamic Text service on the same number.
+
+1. Apply `0008` (`npm run db:migrate`) **before** deploying ingest, because ingest reads `system_numbers.bot_reply`.
+2. Deploy ingest, then the dashboard.
+3. The owner adds the Micropay API token to ingest: `npx wrangler secret put MICROPAY_TOKEN --config workers/ingest/wrangler.jsonc` (the same token the dashboard uses).
+4. On the numbers tab, set the bot number's "תשובות הבוט נשלחות" to "דרך ממשק השליחה".
 
 ## Micropay automation webhook
 

@@ -14,7 +14,7 @@ const mf = new Miniflare({modules: true, script: 'export default {fetch(){return
 const env = {DB: (await mf.getBindings()).DB as D1Database, INCOMING_TOKEN: token, OUTGOING_TOKEN: out, MICROPAY_TOKEN: 'preview'};
 for (const file of (await readdir(migrations)).filter(f => f.endsWith('.sql')).sort()) for (const sql of (await readFile(new URL(file, migrations), 'utf8')).split(';').filter(s => s.trim())) await env.DB.prepare(sql).run();
 await env.DB.batch([
- env.DB.prepare("INSERT INTO system_numbers VALUES ('+972501234567','משרד',1),('+972501234568','מכירות',1)"),
+ env.DB.prepare("INSERT INTO system_numbers (number,label,active) VALUES ('+972501234567','משרד',1),('+972501234568','מכירות',1)"),
  env.DB.prepare("INSERT INTO users (email,name,role,can_bulk_send,created_at) VALUES ('preview@example.com','מנהלת לדוגמה','admin',1,1),('agent@example.com','נציג לדוגמה','user',0,1)"),
  env.DB.prepare("INSERT INTO user_numbers (email,system_number,can_send) VALUES ('agent@example.com','+972501234567',1),('agent@example.com','+972501234568',0)"),
  env.DB.prepare("UPDATE users SET test_number='+972500000001' WHERE email='preview@example.com'"),
