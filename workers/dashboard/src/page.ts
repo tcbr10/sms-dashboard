@@ -341,7 +341,8 @@ function copy(text){if(!navigator.clipboard){toast('ההעתקה אינה נתמ
 function applyColumns(save){renderHead();cache.clear();$('rows').replaceChildren();render();if(save){clearTimeout(saveTimer);saveTimer=setTimeout(function(){post('/api/me/prefs',{columns:visible}).catch(function(){toast('שמירת העמודות נכשלה');});},600);}}
 function columnsMenu(){popover($('columns-btn'),function(m){m.append(el('div','menu-title','עמודות מוצגות'));const box=el('div','check-list');
  for(const c of COLS){const l=el('label','check');const cb=el('input');cb.type='checkbox';cb.checked=visible.includes(c.id);cb.addEventListener('change',function(){const next=cb.checked?order(visible.concat([c.id])):visible.filter(function(id){return id!==c.id;});if(!next.length){cb.checked=true;return;}visible=next;applyColumns(true);});l.append(cb,c.label);box.append(l);}
- const reset=el('button','ghost','חזרה לברירת המחדל');reset.type='button';reset.addEventListener('click',function(){visible=order(defaultColumns());applyColumns(true);closeMenu();});m.append(box,reset);});}
+ 
+ const reset=el('button','ghost','חזרה לברירת המחדל');reset.type='button';reset.addEventListener('click',function(){visible=order(defaultColumns());applyColumns(true);closeMenu();});m.append(box,reset);if(ME.role==='admin'){const manage=el('a','ghost','ניהול שדות אנשי קשר');manage.href='/admin#fields';m.append(manage);}});}
 function filterDialog(){const sel=$('fd-sort');sel.replaceChildren();for(const c of COLS)if(c.sort)for(const o of [['asc','עולה'],['desc','יורד']]){const opt=el('option','',c.label+' · '+o[1]);opt.value=c.sort+':'+o[0];sel.append(opt);}sel.value=state.sort+':'+state.order;
  const body=$('fd-body');body.replaceChildren();for(const c of COLS)if(c.filter){const s=el('div','fd-section');s.append(el('div','menu-title',c.label),filterControl(c,load));body.append(s);}$('filter-dlg').showModal();}
 

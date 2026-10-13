@@ -30,7 +30,7 @@ export async function me(env: Env, user: User): Promise<Response> {
 export async function prefs(request: Request, env: Env, user: User): Promise<Response> {
  const body = await readBody(request); const sets: string[] = []; const values: (string|null)[] = [];
  if (body.density !== undefined) { if (body.density !== 'wide' && body.density !== 'narrow' && body.density !== 'dense') throw new HttpError(400,'Invalid density'); sets.push('density=?'); values.push(body.density); }
- if (body.columns !== undefined) { if (!Array.isArray(body.columns) || body.columns.length > 30 || body.columns.some(c => typeof c !== 'string' || !/^(c:)?[a-z][a-z0-9_]{0,19}$/.test(c))) throw new HttpError(400,'Invalid columns'); sets.push('columns=?'); values.push(JSON.stringify([...new Set(body.columns)])); }
+ if (body.columns !== undefined) { if (!Array.isArray(body.columns) || body.columns.length > 40 || body.columns.some(c => typeof c !== 'string' || !/^(c:)?[a-z][a-z0-9_]{0,19}$/.test(c))) throw new HttpError(400,'Invalid columns'); sets.push('columns=?'); values.push(JSON.stringify([...new Set(body.columns)])); }
  if (body.test_number !== undefined) { sets.push('test_number=?'); values.push(body.test_number === null || body.test_number === '' ? null : recipient(body.test_number)); }
  if (!sets.length) throw new HttpError(400,'Nothing to update');
  await env.DB.prepare('UPDATE users SET '+sets.join(',')+' WHERE email=?').bind(...values, user.email).run(); return json({ok:true});

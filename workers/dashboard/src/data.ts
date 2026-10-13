@@ -52,7 +52,7 @@ export async function data(url: URL, env: Env, user: User): Promise<Response> {
  // lets SQLite seek in the index, where the plain OR made every poll walk the index from the start.
  if(cursor) {conditions.push(`${expr} ${op}= ? AND (${expr} ${op} ? OR m.id ${op} ?)`);bindings.push(cursor.t,cursor.t,cursor.id);}
  // The first page of an export is recorded with its filters and columns.
- if (exporting && !p.has('cursor')) { const filtersUsed=Object.fromEntries([...p].filter(([k])=>!['export','limit','sort','order','columns','format'].includes(k))); await audit(env,user.email,'export',null,{filters:filtersUsed,columns:(p.get('columns')||'').split(',').filter(Boolean).slice(0,30),format:p.get('format')==='csv'?'csv':'xlsx'}).run(); }
+ if (exporting && !p.has('cursor')) { const filtersUsed=Object.fromEntries([...p].filter(([k])=>!['export','limit','sort','order','columns','format'].includes(k))); await audit(env,user.email,'export',null,{filters:filtersUsed,columns:(p.get('columns')||'').split(',').filter(Boolean).slice(0,40),format:p.get('format')==='csv'?'csv':'xlsx'}).run(); }
  const syncStart=Date.now()-1;
  // Live updates always seek by update time; other filters (a number, a customer) must not pull them onto another index.
  const from=updates?FROM.replace('messages m','messages m INDEXED BY idx_messages_updates'):FROM;

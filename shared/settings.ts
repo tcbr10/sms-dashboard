@@ -1,5 +1,6 @@
 import {HttpError} from './validation';
 export type ContactField = {id:string;label:string};
+export const MAX_CONTACT_FIELDS = 20;
 export type Settings = {contact_fields:ContactField[];org_name:string;default_density:'wide'|'narrow'|'dense';refresh_seconds:number;max_recipients:number;default_daily_limit:number;optout_keywords:string[];optout_text:string;allow_international:boolean};
 export const DEFAULT_SETTINGS: Settings = {contact_fields:[{id:'name',label:'שם'},{id:'id_number',label:'תעודת זהות'}],org_name:'',default_density:'narrow',refresh_seconds:5,max_recipients:500,default_daily_limit:1000,optout_keywords:['הסר','הסרה','STOP','UNSUBSCRIBE'],optout_text:'',allow_international:false};
 export async function loadSettings(db: D1Database): Promise<Settings> {
@@ -11,7 +12,7 @@ function int(value: unknown, name: string, min: number, max: number): number { i
 function str(value: unknown, name: string, max: number): string { if (typeof value !== 'string' || value.trim().length > max) throw new HttpError(400, name+' must be text of at most '+max+' characters'); return value.trim(); }
 // Field IDs go into JSON paths and column IDs, so they are restricted to lowercase letters, digits and underscores.
 function contactFields(value: unknown): ContactField[] {
- if (!Array.isArray(value) || value.length > 10) throw new HttpError(400,'contact_fields must be a list of up to 10 fields');
+ if (!Array.isArray(value) || value.length > MAX_CONTACT_FIELDS) throw new HttpError(400,'contact_fields must be a list of up to '+MAX_CONTACT_FIELDS+' fields');
  const ids = new Set<string>();
  return value.map(f => { const v = f as Record<string,unknown>; if (!v || typeof v.id !== 'string' || !/^[a-z][a-z0-9_]{0,19}$/.test(v.id) || ids.has(v.id)) throw new HttpError(400,'Invalid contact field id'); ids.add(v.id); const label = str(v.label,'Contact field name',30); if (!label) throw new HttpError(400,'Contact field name is required'); return {id:v.id,label}; });
 }

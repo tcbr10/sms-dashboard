@@ -275,6 +275,13 @@ describe('Cloudflare Access sync',()=>{
  it('does nothing when not configured',async()=>{expect(await body(api('admin@example.com','/api/admin/users/save',{...save('new@example.com',true),create:true}))).toEqual({ok:true,access:null});
   expect((await api('admin@example.com','/api/admin/users/access-sync',{})).status).toBe(503);});
 });
+describe('contact fields limit',()=>{
+ it('allows 20 contact fields, refuses 21, and lets users show them all as columns',async()=>{const fields=(n:number)=>Array.from({length:n},(_,i)=>({id:'f'+i,label:'שדה '+(i+1)}));
+  expect((await api('admin@example.com','/api/admin/settings',{contact_fields:fields(21)})).status).toBe(400);expect((await api('admin@example.com','/api/admin/settings',{contact_fields:fields(20)})).status).toBe(200);
+  expect(((await body(api('alice@example.com','/api/me'))).contact_fields as unknown[])).toHaveLength(20);
+  const columns=['time','direction','peer','number','body','status','sent_by','received',...fields(20).map(f=>'c:'+f.id)];expect((await api('alice@example.com','/api/me/prefs',{columns})).status).toBe(200);
+  expect((await api('alice@example.com','/api/messages?cf_f19=x')).status).toBe(200);});
+});
 describe('phone number parsing',()=>{
  const cases:[string,string][]=[['050-123-4567','+972501234567'],['0501234567','+972501234567'],['501234567','+972501234567'],['972501234567','+972501234567'],['+972-50-123-4567','+972501234567'],
   ['+972 (0)50-123-4567','+972501234567'],['9720501234567','+972501234567'],['00972501234567','+972501234567'],['‪050-1234567‬','+972501234567'],['⁦050 123 4567⁩','+972501234567'],

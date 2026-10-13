@@ -65,6 +65,14 @@ const userDialog = String.raw`
  <div class="banner" id="ct-error" role="alert" hidden></div>
  <div class="dialog-foot"><button type="button" class="ghost danger" id="ct-delete">מחיקת איש הקשר</button><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn">שמירה</button></div>
 </form></dialog>
+<dialog id="fm-dlg" aria-labelledby="fm-title"><form class="dialog-body" id="fm-form" novalidate>
+ <div class="dialog-head"><h2 id="fm-title">שדות אנשי קשר</h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <p class="hint">השדות מופיעים כעמודות בטבלת ההודעות, בחיפוש, בסינון ובייצוא, בעריכת פרטי לקוח ובשמירת תשובות של הבוט. אפשר להגדיר עד 20 שדות. הסרת שדה מסתירה אותו בלבד; הנתונים שנשמרו בו לא נמחקים.</p>
+ <div class="field-rows" id="fm-fields"></div>
+ <div class="row"><button type="button" class="ghost" id="fm-add">`+svg('plus')+String.raw`הוספת שדה</button></div>
+ <div class="banner" id="fm-error" role="alert" hidden></div>
+ <div class="dialog-foot"><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="fm-save">שמירה</button></div>
+</form></dialog>
 <dialog id="bf-dlg" aria-labelledby="bf-title"><form class="dialog-body" id="bf-form" novalidate>
  <div class="dialog-head"><h2 id="bf-title"></h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
  <div class="grid2"><label class="fld"><span>שם התהליך</span><input id="bf-name" maxlength="60" placeholder="לדוגמה: סקר התעניינות"></label><label class="fld"><span>מספר</span><select id="bf-number"></select></label></div>
@@ -131,7 +139,7 @@ const body = header('admin',false) + String.raw`
   <div class="table-wrap"><table class="list"><thead><tr><th><span>שם תצוגה</span></th><th><span>מספר</span></th><th><span>סטטוס</span></th><th><span>משתמשים משויכים</span></th></tr></thead><tbody id="n-rows"></tbody></table></div>
  </section>
  <section class="panel" data-panel="contacts" hidden>
-  <div class="toolbar"><label class="field search">`+svg('search')+String.raw`<input id="c-q" type="search" placeholder="חיפוש לפי מספר או פרטים" aria-label="חיפוש אנשי קשר"></label><label class="ghost end" id="c-import-btn">`+svg('file')+String.raw`ייבוא מקובץ<input type="file" id="c-file" accept=".csv,.txt,.xlsx" hidden></label><button type="button" class="btn" id="c-add">`+svg('plus')+String.raw`הוספת איש קשר</button></div>
+  <div class="toolbar"><label class="field search">`+svg('search')+String.raw`<input id="c-q" type="search" placeholder="חיפוש לפי מספר או פרטים" aria-label="חיפוש אנשי קשר"></label><label class="ghost end" id="c-import-btn">`+svg('file')+String.raw`ייבוא מקובץ<input type="file" id="c-file" accept=".csv,.txt,.xlsx" hidden></label><button type="button" class="ghost" id="c-fields">`+svg('columns')+String.raw`ניהול שדות</button><button type="button" class="btn" id="c-add">`+svg('plus')+String.raw`הוספת איש קשר</button></div>
   <div class="table-wrap"><table class="list"><thead><tr id="c-head"></tr></thead><tbody id="c-rows"></tbody></table></div>
   <div class="foot"><span id="c-count"></span><span>הפרטים מוצגים לצד מספר הלקוח בטבלת ההודעות ובייצוא. את השדות מגדירים בלשונית ההגדרות.</span></div>
  </section>
@@ -490,11 +498,21 @@ $('o-rows').addEventListener('click',async function(e){const b=e.target.closest(
  try{await post('/api/admin/optouts/remove',{number:b.dataset.number});toast('המספר הוסר מהרשימה');await loadOptouts();}catch(err){error(err);}});
 
 function fieldRow(f){const r=el('div','field-row');const inp=el('input','field');inp.maxLength=30;inp.value=f.label;inp.dataset.id=f.id;inp.setAttribute('aria-label','שם השדה');const x=el('button','icon-btn');x.type='button';x.setAttribute('aria-label','הסרת השדה');x.append(icon('trash'));x.addEventListener('click',function(){r.remove();});r.append(inp,x);return r;}
-$('s-field-add').addEventListener('click',function(){if($('s-fields').children.length>=10){toast('אפשר להגדיר עד 10 שדות');return;}const r=fieldRow({id:'f'+Date.now().toString(36),label:''});$('s-fields').append(r);r.querySelector('input').focus();});
+const MAX_FIELDS=20;
+function addFieldRow(box){if(box.children.length>=MAX_FIELDS){toast('אפשר להגדיר עד '+MAX_FIELDS+' שדות');return;}const r=fieldRow({id:'f'+Date.now().toString(36),label:''});box.append(r);r.querySelector('input').focus();}
+function fieldsFrom(box){return Array.from(box.querySelectorAll('input')).map(function(i){return {id:i.dataset.id,label:i.value.trim()};}).filter(function(f){return f.label;});}
+$('s-field-add').addEventListener('click',function(){addFieldRow($('s-fields'));});
+// "Manage fields" from the contacts tab (and from the messages page via #fields): only the contact fields are saved.
+async function openFields(){try{SETTINGS=await get('/api/admin/settings');}catch(err){error(err);return;}const box=$('fm-fields');box.replaceChildren();for(const f of SETTINGS.contact_fields)box.append(fieldRow(f));
+ $('fm-error').hidden=true;$('fm-dlg').showModal();if(!SETTINGS.contact_fields.length)addFieldRow(box);}
+$('fm-add').addEventListener('click',function(){addFieldRow($('fm-fields'));});
+$('c-fields').addEventListener('click',openFields);
+$('fm-form').addEventListener('submit',async function(e){e.preventDefault();$('fm-error').hidden=true;$('fm-save').disabled=true;
+ try{SETTINGS=await post('/api/admin/settings',{contact_fields:fieldsFrom($('fm-fields'))});$('fm-dlg').close();toast('השדות נשמרו');if(!$('c-rows').closest('[data-panel]').hidden)await loadContacts();}catch(err){dlgError('fm-error',err);}finally{$('fm-save').disabled=false;}});
 async function loadSettings(){SETTINGS=await get('/api/admin/settings');$('s-fields').replaceChildren();for(const f of SETTINGS.contact_fields)$('s-fields').append(fieldRow(f));$('s-org').value=SETTINGS.org_name;$('s-density').value=SETTINGS.default_density;$('s-refresh').value=SETTINGS.refresh_seconds;$('s-max').value=SETTINGS.max_recipients;
  $('s-daily').value=SETTINGS.default_daily_limit;$('s-keywords').value=SETTINGS.optout_keywords.join(', ');$('s-optout').value=SETTINGS.optout_text;$('s-intl').checked=SETTINGS.allow_international;$('s-error').hidden=true;}
 $('s-form').addEventListener('submit',async function(e){e.preventDefault();$('s-error').hidden=true;const n=function(id){return Number($(id).value);};
- try{SETTINGS=await post('/api/admin/settings',{org_name:$('s-org').value,default_density:$('s-density').value,refresh_seconds:n('s-refresh'),max_recipients:n('s-max'),default_daily_limit:n('s-daily'),optout_keywords:$('s-keywords').value.split(',').map(function(s){return s.trim();}).filter(Boolean),optout_text:$('s-optout').value,allow_international:$('s-intl').checked,contact_fields:Array.from($('s-fields').querySelectorAll('input')).map(function(i){return {id:i.dataset.id,label:i.value.trim()};}).filter(function(f){return f.label;})});
+ try{SETTINGS=await post('/api/admin/settings',{org_name:$('s-org').value,default_density:$('s-density').value,refresh_seconds:n('s-refresh'),max_recipients:n('s-max'),default_daily_limit:n('s-daily'),optout_keywords:$('s-keywords').value.split(',').map(function(s){return s.trim();}).filter(Boolean),optout_text:$('s-optout').value,allow_international:$('s-intl').checked,contact_fields:fieldsFrom($('s-fields'))});
   toast('ההגדרות נשמרו');await loadSettings();$('org').textContent=SETTINGS.org_name||'מצב הגשה אינו אישור מסירה';}
  catch(err){dlgError('s-error',err);}});
 
@@ -519,6 +537,6 @@ async function loadAudit(reset){if(reset){auditBefore=null;$('a-rows').replaceCh
  $('a-more-row').hidden=!d.more;}
 $('a-more').addEventListener('click',function(){loadAudit(false).catch(error);});
 
-(async function(){try{await loadMe();}catch(e){error(e);return;}showTab(location.hash.slice(1));})();
+(async function(){try{await loadMe();}catch(e){error(e);return;}const fields=location.hash==='#fields';showTab(fields?'contacts':location.hash.slice(1));if(fields)openFields();})();
 `;
 export function adminPage(nonce:string):string { return shell(nonce,'ניהול · הודעות SMS',css,body,script); }
