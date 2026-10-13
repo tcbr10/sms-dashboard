@@ -43,13 +43,17 @@ The README documents setup, routes, field mapping and operations in detail.
 | `workers/dashboard/src/contacts.ts` | `/api/contacts/save`: contact edits by admins and permitted users, merging only the changed fields |
 | `workers/dashboard/src/imports.ts` | `/api/admin/imports*`: message import from spreadsheets (start, rows, undo), duplicate checks |
 | `workers/dashboard/src/access.ts` | Cloudflare Access policy sync (active users' emails) |
+| `shared/forwarding.ts` | Webhook deliveries: queue, signed request, retries (ingest cron) |
+| `shared/bot.ts` | Bot engine: conversation state, option matching, replies, answers |
+| `workers/dashboard/src/forwards.ts` | `/api/admin/forwards*`: rules, delivery log, test, resend |
+| `workers/dashboard/src/flows.ts` | `/api/admin/flows*` (admins), `/api/bot/info` and `/api/bot/block` (users) |
 | `workers/dashboard/src/send.ts` | `/api/send`: permission and limit checks, idempotent send ID, Micropay call, per-recipient rows |
 | `workers/dashboard/src/ui.ts` | Shared CSS, header, icons and browser helpers (requests, popover menus, confirm dialog, CSV/Excel reader); the no-access and session-ended pages |
 | `workers/dashboard/src/page.ts` | Messages page: columns and header menus, export (CSV and a small .xlsx writer), lists, compose panel with test sends |
 | `workers/dashboard/src/admin-page.ts` | Admin page |
 | `shared/validation.ts` | `Env`, phone and recipient normalization, body reading, cursors |
 | `shared/settings.ts` | Settings defaults and validation, opt-out word matching (also used by ingest) |
-| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id` |
+| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id`; `0007_forwarding_bot.sql` forwarding rules and deliveries, bot flows, conversations, answers and blocks |
 | `tests/workers.test.ts` | Miniflare D1 tests: ingest, isolation, table queries, access, admin, sending (fake Micropay) |
 | `scripts/preview.ts` | Local preview with seeded data, live inserts and a fake Micropay (`npm run preview`; `PREVIEW_USER=agent@example.com` for a regular user) |
 
@@ -76,6 +80,9 @@ The README documents setup, routes, field mapping and operations in detail.
 - **Message imports write one INSERT … SELECT per batch.** The free plan allows 50 queries per Worker request, so a statement per row would fail. The duplicate check inside it seeks `idx_messages_conversation_time`. Rows without a msgid get a content key (`[dir,'import',system,peer,time,sha256(body),n]`, where n separates identical rows of one file), which is why re-uploading a file adds nothing.
 - **One phone parser, written twice.** `parseRecipient()` (server) and `PHONE_JS`/`parsePhone()` (browser) must stay identical; the "phone number parsing" test runs both on the same cases. `phone()`, used for Micropay's own numbers in ingest, stays lenient.
 - **Access sync rewrites only email rules,** always the full list of active users, and never blocks a user change. The policy ID and account ID live only in the local `wrangler.jsonc`.
+- **The bot answers through Micropay's webhook response,** which Micropay sends as an SMS from the same number. No API call or token is needed in ingest, but only messages that come through `/hooks/micropay/incoming` get replies. Bot errors are caught and mean "no reply"; they never fail the callback.
+- **Forwarding runs after the response** (`ctx.waitUntil`) and its retries run on the ingest cron. Each delivery claims itself by pushing `next_at` a minute ahead, so the cron and an immediate try never send the same delivery at once. A cron run handles at most 10 deliveries because of the free plan's 50 queries per invocation.
+- **Statements over many rows use `json_each`** (imports, flow starts, bot blocks) rather than one statement per row, for the same 50-query limit.
 - **Lists are expanded in the browser** into recipients; the send endpoint stays the single place that validates and limits recipients.
 - **Cursors are UTF-8 base64url**, because contact sort values can be Hebrew.
 
@@ -143,6 +150,12 @@ Order matters: the migration must exist before code that uses it, and the Access
 1. The owner creates a Cloudflare API token with **Access: Apps and Policies - Edit** on this account and runs `npx wrangler secret put CF_API_TOKEN --config workers/dashboard/wrangler.jsonc`.
 2. Done locally: `ACCESS_ACCOUNT_ID` and `ACCESS_POLICY_ID` are in the git-ignored `workers/dashboard/wrangler.jsonc`.
 3. Done: deployed the dashboard (no migration). After the token is set, press "סנכרון עם Cloudflare" on the users tab and check the policy in Zero Trust.
+
+## Rollout of webhook forwarding and the bot
+
+1. Apply `0007` (`npm run db:migrate`) **before** deploying, because both Workers use the new tables.
+2. Deploy ingest (adds the bot replies and the every-minute cron trigger; the `triggers` entry is in the local `workers/ingest/wrangler.jsonc`), then the dashboard.
+3. Build flows on the "בוט" tab (they start inactive) and forwarding rules on the "העברה ל-Webhook" tab. Send a test from a forwarding rule before relying on it.
 
 ## Micropay automation webhook
 

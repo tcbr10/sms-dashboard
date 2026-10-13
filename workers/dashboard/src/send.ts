@@ -2,6 +2,7 @@ import {Env,HttpError,json,phone,readBody,recipient,text} from '../../../shared/
 import {loadSettings} from '../../../shared/settings';
 import {micropaySubmission,SubmissionResult} from '../../../shared/micropay-submission';
 import {User,audit,sentLast24h} from './users';
+import {enterMany,loadFlow} from '../../../shared/bot';
 export type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
 const MICROPAY_SEND = 'https://www.micropay.co.il/extApi/scheduleSms.php';
 // Micropay's examples use local Israeli numbers; other countries go as digits with the country code.
@@ -18,7 +19,11 @@ export async function send(request: Request, env: Env, user: User, fetcher: Fetc
  const settings = await loadSettings(env.DB); const admin = user.role === 'admin'; const system = phone(body.system_number);
  const allowed = admin ? await env.DB.prepare('SELECT 1 FROM system_numbers WHERE number=? AND active=1').bind(system).first() : await env.DB.prepare('SELECT 1 FROM user_numbers u JOIN system_numbers s ON s.number=u.system_number WHERE u.email=? AND u.system_number=? AND u.can_send=1 AND s.active=1').bind(user.email,system).first();
  if (!allowed) throw new HttpError(403,'Sending from this number is not allowed');
- let message = text(body.body,'message',1000); if (!message.trim()) throw new HttpError(400,'Message is empty');
+ // A send can start a bot flow: the message is the flow's first step, and the recipients' replies continue the flow.
+ const flow = body.flow_id === undefined || body.flow_id === null ? null : Number.isSafeInteger(body.flow_id) ? await loadFlow(env,body.flow_id as number) : null;
+ if (body.flow_id !== undefined && body.flow_id !== null && (!flow || !flow.active || flow.system_number !== system || !flow.steps.length)) throw new HttpError(400,'This flow is not active on this number');
+ const stopBot = body.stop_bot === true && !flow;
+ let message = flow ? flow.steps[0].text : text(body.body,'message',1000); if (!message.trim()) throw new HttpError(400,'Message is empty');
  const test = body.test === true; if (test && (!Array.isArray(body.recipients) || body.recipients.length !== 1)) throw new HttpError(400,'A test goes to exactly one number');
  if (!Array.isArray(body.recipients) || !body.recipients.length) throw new HttpError(400,'Add at least one recipient'); if (body.recipients.length > 10000) throw new HttpError(413,'Too many recipients');
  const unique = new Set<string>(); let invalid = 0;
@@ -44,7 +49,13 @@ export async function send(request: Request, env: Env, user: User, fetcher: Fetc
  await env.DB.batch([
   env.DB.prepare(`INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,provider_message_id,updated_at,sent_by,send_id) SELECT json_array('out','send:'||?1||':'||value),'out',?2,value,?3,?4,?4,'workflow',?5,NULL,?4,?6,?1 FROM json_each(?7) WHERE true ON CONFLICT(event_key) DO NOTHING`).bind(id,system,message,now,status,user.email,JSON.stringify(recipients)),
   env.DB.prepare('UPDATE sends SET status=?,task_id=?,error=?,finished_at=? WHERE id=?').bind(status,result.task_id ?? null,error,Date.now(),id),
-  audit(env,user.email,'send',system,{id,recipients:recipients.length,status,...(test?{test:true}:{})}),
+  audit(env,user.email,'send',system,{id,recipients:recipients.length,status,...(test?{test:true}:{}),...(flow?{flow:flow.id}:{}),...(stopBot?{stop_bot:true}:{})}),
  ]);
+ // Bot state follows only sends that may have gone out. Starting a flow lifts a bot block for these recipients.
+ // One statement per change for all recipients: the free plan allows 50 queries per request.
+ const list = JSON.stringify(recipients);
+ if (status !== 'rejected' && !test && (flow || stopBot)) await env.DB.batch(flow
+  ? [env.DB.prepare('DELETE FROM bot_blocks WHERE system_number=? AND peer_number IN (SELECT value FROM json_each(?))').bind(system,list),enterMany(env,flow,flow.steps[0],system,recipients,now)]
+  : [env.DB.prepare('INSERT INTO bot_blocks (system_number,peer_number,created_at,created_by) SELECT ?,value,?,? FROM json_each(?) WHERE true ON CONFLICT DO NOTHING').bind(system,now,user.email,list),env.DB.prepare('DELETE FROM conversations WHERE system_number=? AND peer_number IN (SELECT value FROM json_each(?))').bind(system,list)]);
  return json({id,status,sent:recipients.length,skipped:{invalid,duplicates,opted_out:blocked.size},task_id:result.task_id ?? null,error:status === 'accepted' ? null : error});
 }

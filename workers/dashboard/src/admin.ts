@@ -4,6 +4,8 @@ import {User,audit} from './users';
 import {imports} from './imports';
 import {Fetcher} from './send';
 import {accessConfigured,lastSync,syncAccess} from './access';
+import {forwards} from './forwards';
+import {flows} from './flows';
 const DAY = 86400000;
 function email(value: unknown): string { const e = text(value,'email',254).trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw new HttpError(400,'Invalid email'); return e; }
 function name(value: unknown): string { if (value === undefined) return ''; if (typeof value !== 'string' || value.trim().length > 80) throw new HttpError(400,'Name must be at most 80 characters'); return value.trim(); }
@@ -21,6 +23,8 @@ export async function admin(request: Request, url: URL, env: Env, user: User, fe
  if (user.role !== 'admin') throw new HttpError(403,'Admins only');
  const path = url.pathname.slice('/api/admin/'.length);
  if (path === 'imports' || path.startsWith('imports/')) return imports(request,path,env,user);
+ if (path === 'forwards' || path.startsWith('forwards/')) return forwards(request,path,env,user,fetcher);
+ if (path === 'flows' || path.startsWith('flows/')) return flows(request,path,url,env,user);
  if (request.method === 'GET') {
   if (path === 'users') { const r = await env.DB.prepare("SELECT u.email,u.name,u.role,u.active,u.can_bulk_send,u.can_edit_contacts,u.daily_limit,u.created_at,u.last_seen_at,u.test_number,u.sessions_revoked_at,(SELECT json_group_array(json_object('number',n.system_number,'can_send',n.can_send)) FROM user_numbers n WHERE n.email=u.email) AS numbers,(SELECT COALESCE(SUM(s.recipients),0) FROM sends s WHERE s.email=u.email AND s.created_at>? AND s.status!='rejected') AS sent_24h FROM users u ORDER BY u.role,u.name,u.email").bind(Date.now()-DAY).all<Record<string,unknown>>(); return json({users:r.results.map(u => ({...u,numbers:JSON.parse(String(u.numbers))})),access:{configured:accessConfigured(env),last:await lastSync(env)}}); }
   if (path === 'numbers') return json({numbers:(await env.DB.prepare('SELECT s.number,s.label,s.active,(SELECT COUNT(*) FROM user_numbers u WHERE u.system_number=s.number) AS users FROM system_numbers s ORDER BY s.active DESC,s.label,s.number').all()).results});

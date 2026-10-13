@@ -10,6 +10,7 @@ export const ICONS: Record<string,string> = {
  search:'<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',file:'<path d="M7 3.5h6.5L18 8v12.5H7z"/><path d="M13 3.5V8h5"/>',
  filter:'<path d="M4.5 6h15l-6 7v5.5l-3-1.5v-4z"/>',columns:'<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M9.5 5v14M14.5 5v14"/>',download:'<path d="M12 4.5v11M7 11l5 5 5-5M5 19.5h14"/>',
  list:'<path d="M9 7h10M9 12h10M9 17h10M5 7h.01M5 12h.01M5 17h.01"/>',flask:'<path d="M9.5 4h5M10.5 4v5.5L5.5 18a1.5 1.5 0 0 0 1.3 2h10.4a1.5 1.5 0 0 0 1.3-2l-5-8.5V4"/><path d="M8 14.5h8"/>',user:'<circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5a7 7 0 0 1 14 0"/>',trash:'<path d="M5 7h14M10 7V5h4v2M7 7l1 12.5h8L17 7"/>',
+ 'bot-on':'<rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 4.5V8M9.5 13h.01M14.5 13h.01"/>','bot-off':'<rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 4.5V8M9.5 13h.01M14.5 13h.01M4 4l16 16"/>',
  logout:'<path d="M14 4.5h3.5a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H14M10 16.5L5.5 12 10 7.5M5.5 12H15"/>',edit:'<path d="M4.5 19.5h4l10-10a2.1 2.1 0 0 0-4-4l-10 10z"/><path d="M13.5 6.5l4 4"/>',
  wide:'<path d="M5 6h14M5 12h14M5 18h14"/>',narrow:'<path d="M5 6.5h14M5 10.5h14M5 14.5h14M5 18.5h14"/>',dense:'<path d="M5 5h14M5 8.5h14M5 12h14M5 15.5h14M5 19h14"/>',
 };

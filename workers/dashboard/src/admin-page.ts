@@ -24,6 +24,17 @@ const css = String.raw`
 .mi-preview .list{min-width:660px}
 .mi-body{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mi-errors{margin:0;padding-inline-start:18px}
+.section-title{padding:12px 14px 4px;font-size:13px;font-weight:650;color:var(--ink2)}
+.url-cell{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr;text-align:right}
+#bf-dlg,#ba-dlg{width:min(900px,calc(100vw - 24px))}
+.steps{display:grid;gap:12px}
+.step-card{display:grid;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--field)}
+.step-head{display:flex;align-items:center;gap:8px}.step-head .end{display:flex;gap:2px}.step-head b{font-size:14px}.step-head select{width:auto;min-height:32px}
+.opt-row{display:grid;grid-template-columns:110px minmax(0,1fr) minmax(0,1fr) 32px;gap:6px;align-items:center}
+.opt-row input,.opt-row select{min-height:32px}
+.opt-head{font-size:12px;color:var(--muted)}
+@media (max-width:760px){.opt-row{grid-template-columns:80px minmax(0,1fr) 32px}.opt-row .opt-next{grid-column:2/3}}
+.secret-row{display:flex;gap:8px;align-items:center}.secret-row input{flex:1;min-width:0;font-family:ui-monospace,monospace;font-size:12.5px}
 `;
 const userDialog = String.raw`
 <dialog id="user-dlg" aria-labelledby="ud-title"><form class="dialog-body" id="ud-form" novalidate>
@@ -52,6 +63,34 @@ const userDialog = String.raw`
  <div class="banner" id="ct-error" role="alert" hidden></div>
  <div class="dialog-foot"><button type="button" class="ghost danger" id="ct-delete">מחיקת איש הקשר</button><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn">שמירה</button></div>
 </form></dialog>
+<dialog id="bf-dlg" aria-labelledby="bf-title"><form class="dialog-body" id="bf-form" novalidate>
+ <div class="dialog-head"><h2 id="bf-title"></h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <div class="grid2"><label class="fld"><span>שם התהליך</span><input id="bf-name" maxlength="60" placeholder="לדוגמה: סקר התעניינות"></label><label class="fld"><span>מספר</span><select id="bf-number"></select></label></div>
+ <div class="fld"><span class="label">מתי התהליך מתחיל</span><div class="seg" role="group" aria-label="התחלה"><button type="button" data-trigger="any" aria-pressed="true">כל הודעה נכנסת</button><button type="button" data-trigger="keyword" aria-pressed="false">מילת מפתח</button><button type="button" data-trigger="send" aria-pressed="false">רק משליחה מהלוח</button></div>
+  <input id="bf-keyword" class="field" maxlength="30" placeholder="מילת המפתח (ההודעה כולה או המילה הראשונה בה)" hidden><p class="hint" id="bf-trigger-hint"></p></div>
+ <div class="grid2"><label class="fld"><span>שיחה נסגרת אחרי שקט של (שעות)</span><input type="number" id="bf-expire" min="1" max="720"></label><label class="fld"><span>הודעה לתשובה לא מזוהה</span><input id="bf-fallback" maxlength="300" placeholder="לא זיהינו את התשובה."></label></div>
+ <div class="fld"><span class="label">שלבים</span><div class="steps" id="bf-steps"></div><div class="row"><button type="button" class="ghost" id="bf-add-step">`+svg('plus')+String.raw`הוספת שלב</button><span class="hint">השלב הראשון נשלח כשהתהליך מתחיל. תשובה לא מזוהה חוזרת על השאלה פעמיים ואז השיחה נסגרת. לקוח שמשיב במילת הסרה יוצא מהתהליך.</span></div></div>
+ <label class="check"><input type="checkbox" id="bf-active">התהליך פעיל</label>
+ <div class="banner" id="bf-error" role="alert" hidden></div>
+ <div class="dialog-foot"><button type="button" class="ghost danger" id="bf-delete">מחיקת התהליך</button><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="bf-save">שמירה</button></div>
+</form></dialog>
+<dialog id="ba-dlg" aria-labelledby="ba-title"><div class="dialog-body">
+ <div class="dialog-head"><h2 id="ba-title"></h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <div class="table-wrap rp-wrap"><table><thead><tr><th><span>זמן</span></th><th><span>לקוח</span></th><th><span>שאלה</span></th><th><span>תשובה</span></th><th><span>משמעות</span></th></tr></thead><tbody id="ba-rows"></tbody></table></div>
+ <div class="dialog-foot"><button type="button" class="ghost" id="ba-export">`+svg('download')+String.raw`ייצוא ל-CSV</button><span class="end"></span><button type="button" class="btn" data-close>סגירה</button></div>
+</div></dialog>
+<dialog id="fw-dlg" aria-labelledby="fw-title"><form class="dialog-body" id="fw-form" novalidate>
+ <div class="dialog-head"><h2 id="fw-title"></h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <div class="grid2"><label class="fld"><span>שם הכלל</span><input id="fw-name" maxlength="60" required placeholder="לדוגמה: מערכת CRM"></label><label class="fld"><span>הודעות נכנסות למספר</span><select id="fw-number"></select></label></div>
+ <label class="fld"><span>כתובת ה-Webhook</span><input id="fw-url" dir="ltr" maxlength="500" placeholder="https://example.com/sms"></label>
+ <label class="fld"><span>רק מהשולחים האלה (ריק = כל השולחים)</span><textarea id="fw-senders" dir="ltr" rows="2" placeholder="מספרים מופרדים בפסיק או בשורה חדשה"></textarea></label>
+ <div class="fld"><span class="label">פורמט</span><div class="seg" role="group" aria-label="פורמט"><button type="button" data-fwformat="json" aria-pressed="true">JSON</button><button type="button" data-fwformat="micropay" aria-pressed="false">כמו Webhook של מיקרופיי</button></div><p class="hint" id="fw-format-hint"></p></div>
+ <label class="fld"><span>כותרות נוספות (אחת בכל שורה, בצורה Name: value)</span><textarea id="fw-headers" dir="ltr" rows="2" placeholder="Authorization: Bearer ..."></textarea></label>
+ <div class="fld" id="fw-secret-row"><span class="label">מפתח חתימה</span><div class="secret-row"><input id="fw-secret" dir="ltr" readonly aria-label="מפתח חתימה"><button type="button" class="ghost" id="fw-secret-new">החלפת המפתח</button></div><p class="hint">כל בקשה כוללת כותרת X-SMS-Signature: sha256=HMAC של גוף הבקשה עם המפתח הזה, כדי שהצד המקבל יוכל לוודא שהיא הגיעה מכאן.</p></div>
+ <label class="check"><input type="checkbox" id="fw-active">הכלל פעיל</label>
+ <div class="banner" id="fw-error" role="alert" hidden></div>
+ <div class="dialog-foot"><button type="button" class="ghost danger" id="fw-delete">מחיקת הכלל</button><button type="button" class="ghost" id="fw-test">`+svg('flask')+String.raw`שליחת בדיקה</button><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="fw-save">שמירה</button></div>
+</form></dialog>
 <dialog id="mi-dlg" aria-labelledby="mi-title"><form class="dialog-body" id="mi-form" novalidate>
  <div class="dialog-head"><h2 id="mi-title">ייבוא הודעות</h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
  <p class="hint" id="mi-info"></p>
@@ -79,7 +118,7 @@ const userDialog = String.raw`
 `;
 const body = header('admin',false) + String.raw`
 <main class="wrap">
- <nav class="tabs" role="tablist" aria-label="ניהול"><button type="button" role="tab" data-tab="users">משתמשים</button><button type="button" role="tab" data-tab="numbers">מספרים</button><button type="button" role="tab" data-tab="contacts">אנשי קשר</button><button type="button" role="tab" data-tab="optouts">רשימת הסרה</button><button type="button" role="tab" data-tab="imports">ייבוא הודעות</button><button type="button" role="tab" data-tab="settings">הגדרות</button><button type="button" role="tab" data-tab="audit">יומן פעולות</button></nav>
+ <nav class="tabs" role="tablist" aria-label="ניהול"><button type="button" role="tab" data-tab="users">משתמשים</button><button type="button" role="tab" data-tab="numbers">מספרים</button><button type="button" role="tab" data-tab="contacts">אנשי קשר</button><button type="button" role="tab" data-tab="optouts">רשימת הסרה</button><button type="button" role="tab" data-tab="imports">ייבוא הודעות</button><button type="button" role="tab" data-tab="bot">בוט</button><button type="button" role="tab" data-tab="forwards">העברה ל-Webhook</button><button type="button" role="tab" data-tab="settings">הגדרות</button><button type="button" role="tab" data-tab="audit">יומן פעולות</button></nav>
  <div class="banner panel" id="error" role="alert" hidden><span id="error-text"></span></div>
  <section class="panel" data-panel="users" hidden>
   <div class="toolbar"><label class="field search">`+svg('search')+String.raw`<input id="u-q" type="search" placeholder="חיפוש לפי שם או אימייל" aria-label="חיפוש משתמשים"></label><span class="hint end" id="u-access" hidden></span><button type="button" class="ghost" id="u-access-sync" hidden>סנכרון עם Cloudflare</button><button type="button" class="btn" id="u-add">`+svg('plus')+String.raw`הוספת משתמש</button></div>
@@ -104,6 +143,16 @@ const body = header('admin',false) + String.raw`
   <div class="table-wrap"><table class="list"><thead><tr><th><span>זמן</span></th><th><span>קובץ</span></th><th><span>על ידי</span></th><th><span>שורות</span></th><th><span>נוספו</span></th><th><span>כפולות שדולגו</span></th><th><span>לא תקינות</span></th><th><span></span></th></tr></thead><tbody id="m-rows"></tbody></table></div>
   <div class="foot"><span></span><span>ביטול ייבוא מסיר רק את ההודעות שהוא הוסיף. מספרים שנוספו לרשימת ההסרה נשארים בה.</span></div>
  </section>
+ <section class="panel" data-panel="bot" hidden>
+  <div class="toolbar"><span class="hint">תהליכים שעונים אוטומטית להודעות נכנסות ושואלים שאלה אחרי שאלה. התשובות נשמרות, ואפשר לשמור אותן בשדות אנשי הקשר.</span><button type="button" class="btn end" id="b-add">`+svg('plus')+String.raw`תהליך חדש</button></div>
+  <div class="table-wrap"><table class="list"><thead><tr><th><span>שם</span></th><th><span>מספר</span></th><th><span>התחלה</span></th><th><span>שלבים</span></th><th><span>שיחות פעילות</span></th><th><span>תשובות</span></th><th><span>סטטוס</span></th><th><span></span></th></tr></thead><tbody id="b-rows"></tbody></table></div>
+ </section>
+ <section class="panel" data-panel="forwards" hidden>
+  <div class="toolbar"><span class="hint">הודעות נכנסות למספר נשלחות לכתובת Webhook. תקלה בכתובת לא משפיעה על קליטת ההודעות, ומשלוח שנכשל מנוסה שוב במשך כיממה.</span><button type="button" class="btn end" id="f-add">`+svg('plus')+String.raw`כלל חדש</button></div>
+  <div class="table-wrap"><table class="list"><thead><tr><th><span>שם</span></th><th><span>מספר</span></th><th><span>שולחים</span></th><th><span>כתובת</span></th><th><span>פורמט</span></th><th><span>סטטוס</span></th></tr></thead><tbody id="f-rows"></tbody></table></div>
+  <div class="section-title">משלוחים אחרונים</div>
+  <div class="table-wrap"><table class="list"><thead><tr><th><span>זמן</span></th><th><span>כלל</span></th><th><span>לקוח</span></th><th><span>הודעה</span></th><th><span>מצב</span></th><th><span>ניסיונות</span></th><th><span>תשובה אחרונה</span></th><th><span></span></th></tr></thead><tbody id="fl-rows"></tbody></table></div>
+ </section>
  <section class="panel" data-panel="settings" hidden>
   <form class="settings" id="s-form" novalidate>
    <div class="grid2"><label class="fld"><span>שם הארגון</span><input id="s-org" maxlength="60" placeholder="מוצג בכותרת"></label><label class="fld"><span>מרווח שורות ברירת מחדל</span><select id="s-density"><option value="wide">רחב</option><option value="narrow">צר</option><option value="dense">צפוף</option></select></label></div>
@@ -123,8 +172,8 @@ const body = header('admin',false) + String.raw`
 </main>
 `+userDialog;
 const script = String.raw`
-const TABS=['users','numbers','contacts','optouts','imports','settings','audit'];
-const ACTIONS={'user.create':'משתמש נוסף','user.update':'משתמש עודכן','user.delete':'משתמש נמחק','number.create':'מספר נוסף','number.update':'מספר עודכן','settings.update':'ההגדרות עודכנו','optout.add':'נוספו לרשימת ההסרה','optout.remove':'הוסר מרשימת ההסרה','send':'שליחת הודעה','export':'ייצוא הודעות','user.disconnect':'ניתוק משתמש','user.logout':'התנתקות','access.sync':'סנכרון Cloudflare Access','messages.import':'ייבוא הודעות','messages.import.undo':'ביטול ייבוא הודעות','contact.save':'איש קשר נשמר','contact.delete':'איש קשר נמחק','contacts.import':'ייבוא אנשי קשר','list.save':'רשימת תפוצה נשמרה','list.delete':'רשימת תפוצה נמחקה'};
+const TABS=['users','numbers','contacts','optouts','imports','bot','forwards','settings','audit'];
+const ACTIONS={'user.create':'משתמש נוסף','user.update':'משתמש עודכן','user.delete':'משתמש נמחק','number.create':'מספר נוסף','number.update':'מספר עודכן','settings.update':'ההגדרות עודכנו','optout.add':'נוספו לרשימת ההסרה','optout.remove':'הוסר מרשימת ההסרה','send':'שליחת הודעה','export':'ייצוא הודעות','user.disconnect':'ניתוק משתמש','user.logout':'התנתקות','access.sync':'סנכרון Cloudflare Access','messages.import':'ייבוא הודעות','flow.save':'תהליך בוט נשמר','flow.delete':'תהליך בוט נמחק','bot.block':'הבוט הושבת ללקוח','bot.unblock':'הבוט הופעל מחדש ללקוח','forward.save':'כלל העברה נשמר','forward.delete':'כלל העברה נמחק','forward.test':'בדיקת Webhook','forward.secret':'מפתח חתימה הוחלף','forward.resend':'שליחה מחדש ל-Webhook','messages.import.undo':'ביטול ייבוא הודעות','contact.save':'איש קשר נשמר','contact.delete':'איש קשר נמחק','contacts.import':'ייבוא אנשי קשר','list.save':'רשימת תפוצה נשמרה','list.delete':'רשימת תפוצה נמחקה'};
 const SEND_STATUS={accepted:'התקבלה',rejected:'נדחתה',unknown:'לא ידוע',sending:'בשליחה'};
 let USERS=[],NUMBERS=[],SETTINGS=null,OPTOUTS=[],CONTACTS=[],auditBefore=null,importRows=null,importMode='update';
 function error(e){$('error').hidden=false;$('error-text').textContent=message(e);}
@@ -133,7 +182,7 @@ function cell(text,cls){return el('td',cls,text);}
 function seen(ms){return ms?shortFmt.format(ms):'טרם התחבר';}
 function showTab(t){if(!TABS.includes(t))t='users';for(const b of document.querySelectorAll('[data-tab]'))b.setAttribute('aria-selected',String(b.dataset.tab===t));
  for(const p of document.querySelectorAll('[data-panel]'))p.hidden=p.dataset.panel!==t;if(location.hash!=='#'+t)history.replaceState(null,'','#'+t);$('error').hidden=true;
- ({users:loadUsers,numbers:loadNumbers,contacts:loadContacts,optouts:loadOptouts,imports:loadImports,settings:loadSettings,audit:function(){return loadAudit(true);}})[t]().catch(error);}
+ ({users:loadUsers,numbers:loadNumbers,contacts:loadContacts,optouts:loadOptouts,imports:loadImports,bot:loadFlows,forwards:loadForwards,settings:loadSettings,audit:function(){return loadAudit(true);}})[t]().catch(error);}
 for(const b of document.querySelectorAll('[data-tab]'))b.addEventListener('click',function(){showTab(b.dataset.tab);});
 for(const b of document.querySelectorAll('[data-close]'))b.addEventListener('click',function(){b.closest('dialog').close();});
 // Connected: seen in the last two minutes and not disconnected since.
@@ -324,6 +373,105 @@ async function loadImports(){const r=await Promise.all([get('/api/admin/imports'
  if(!body.children.length){const tr=el('tr');const td=cell('עדיין לא יובאו הודעות','muted');td.colSpan=8;tr.append(td);body.append(tr);}}
 async function undoImport(m){if(!await confirmAction('ביטול ייבוא','להסיר את '+plural(m.added,'ההודעה שנוספה','ההודעות שנוספו')+' בייבוא "'+m.file+'"? הודעות שהגיעו בדרך אחרת לא יושפעו.','ביטול הייבוא'))return;
  try{const d=await post('/api/admin/imports/undo',{id:m.id});toast(plural(d.removed,'הודעה אחת הוסרה','הודעות הוסרו'));await loadImports();}catch(err){error(err);}}
+
+// Bot flows. The editor keeps the flow in BF and redraws the step cards from it; inputs write straight back into BF.
+let FLOWS=[],BF=null,BA=null;
+const TRIGGERS={any:'כל הודעה נכנסת',keyword:'מילת מפתח',send:'רק משליחה מהלוח'};
+async function loadFlows(){const r=await Promise.all([get('/api/admin/flows'),get('/api/admin/numbers'),get('/api/admin/settings')]);FLOWS=r[0].flows;NUMBERS=r[1].numbers;SETTINGS=r[2];renderFlows();}
+function renderFlows(){const body=$('b-rows');body.replaceChildren();
+ for(const f of FLOWS){const tr=el('tr','click');tr.tabIndex=0;tr.dataset.id=String(f.id);const st=el('td');st.append(el('span','tag'+(f.active?' accent':' off'),f.active?'פעיל':'כבוי'));
+  const ans=el('td');const b=el('button','ghost','תשובות');b.type='button';b.dataset.answers=String(f.id);ans.append(b);
+  tr.append(cell(f.name),cell(labelOf(f.system_number)),cell(f.trigger==='keyword'?'מילת מפתח "'+f.keyword+'"':TRIGGERS[f.trigger]),cell(nf.format(f.steps.length)),cell(nf.format(f.live)),cell(nf.format(f.answers)),st,ans);body.append(tr);}
+ if(!FLOWS.length){const tr=el('tr');const td=cell('עדיין אין תהליכים','muted');td.colSpan=8;tr.append(td);body.append(tr);}}
+function smsParts(t){const len=t.replace(/\n/g,'\r\n').length;if(!len)return 0;const uni=/[^\x00-\x7f]/.test(t);return len<=(uni?70:140)?1:Math.ceil(len/(uni?67:134));}
+function newStepId(){let n=0;for(const s of BF.steps)n=Math.max(n,Number(s.id.slice(1))||0);return 's'+(n+1);}
+function stepLabel(s){const i=BF.steps.indexOf(s);return 'שלב '+(i+1)+(s.text?': '+(s.text.length>28?s.text.slice(0,28)+'…':s.text):'');}
+function nextSelect(current,value,onChange){const sel=el('select','opt-next');const end=el('option','','סיום השיחה');end.value='';sel.append(end);
+ for(const s of BF.steps)if(s!==current){const o=el('option','',stepLabel(s));o.value=s.id;sel.append(o);}sel.value=value||'';sel.addEventListener('change',function(){onChange(sel.value);});return sel;}
+function fieldSelect(value,label,onChange){const l=el('label','row hint');const sel=el('select');const none=el('option','','לא לשמור');none.value='';sel.append(none);for(const f of SETTINGS.contact_fields){const o=el('option','',f.label);o.value=f.id;sel.append(o);}
+ sel.value=value||'';sel.addEventListener('change',function(){onChange(sel.value);});l.append(label,sel);return l;}
+function renderSteps(){const box=$('bf-steps');box.replaceChildren();
+ BF.steps.forEach(function(s,i){const card=el('div','step-card');const head=el('div','step-head');head.append(el('b','','שלב '+(i+1)));
+  const type=el('select');for(const t of [['options','שאלה עם תשובות'],['text','שאלה פתוחה'],['end','הודעת סיום']]){const o=el('option','',t[1]);o.value=t[0];type.append(o);}type.value=s.type;
+  type.addEventListener('change',function(){s.type=type.value;if(s.type==='options'&&!(s.options&&s.options.length))s.options=[{reply:'1',meaning:'',next:''}];renderSteps();});head.append(type);
+  const tools=el('span','end');if(i>0){const up=el('button','icon-btn');up.type='button';up.setAttribute('aria-label','הזזה למעלה');up.append(icon('asc'));up.addEventListener('click',function(){BF.steps.splice(i,1);BF.steps.splice(i-1,0,s);renderSteps();});tools.append(up);}
+  if(BF.steps.length>1){const del=el('button','icon-btn');del.type='button';del.setAttribute('aria-label','מחיקת השלב');del.append(icon('trash'));del.addEventListener('click',function(){BF.steps.splice(i,1);for(const o of BF.steps){if(o.next===s.id)o.next='';for(const op of o.options||[])if(op.next===s.id)op.next='';}renderSteps();});tools.append(del);}
+  head.append(tools);const ta=el('textarea');ta.rows=2;ta.maxLength=1000;ta.value=s.text;ta.placeholder=s.type==='end'?'ההודעה האחרונה ללקוח':'השאלה ללקוח';const count=el('span','hint');
+  const upd=function(){count.textContent=nf.format(s.text.length)+' תווים · '+smsParts(s.text)+' SMS';};ta.addEventListener('input',function(){s.text=ta.value;upd();});ta.addEventListener('change',renderSteps);upd();card.append(head,ta,count);
+  if(s.type==='options'){const hd=el('div','opt-row opt-head');hd.append(el('span','','תשובה'),el('span','','משמעות (נשמרת)'),el('span','','השלב הבא'),el('span'));card.append(hd);
+   s.options.forEach(function(o,k){const row=el('div','opt-row');const r=el('input');r.value=o.reply;r.maxLength=60;r.placeholder='1';r.setAttribute('aria-label','תשובה');r.addEventListener('input',function(){o.reply=r.value;});
+    const m=el('input');m.value=o.meaning;m.maxLength=60;m.placeholder='לדוגמה: מעוניין';m.setAttribute('aria-label','משמעות');m.addEventListener('input',function(){o.meaning=m.value;});
+    const x=el('button','icon-btn');x.type='button';x.setAttribute('aria-label','הסרת התשובה');x.append(icon('close'));x.disabled=s.options.length<2;x.addEventListener('click',function(){s.options.splice(k,1);renderSteps();});
+    row.append(r,m,nextSelect(s,o.next,function(v){o.next=v;}),x);card.append(row);});
+   const add=el('button','ghost');add.type='button';add.append(icon('plus'),'הוספת תשובה');add.disabled=s.options.length>=20;add.addEventListener('click',function(){s.options.push({reply:String(s.options.length+1),meaning:'',next:''});renderSteps();});
+   const row=el('div','row');row.append(add,fieldSelect(s.field,'שמירת המשמעות בשדה',function(v){s.field=v;}));card.append(row);}
+  else if(s.type==='text'){const row=el('div','row');const l=el('label','row hint');l.append('השלב הבא',nextSelect(s,s.next,function(v){s.next=v;}));row.append(l,fieldSelect(s.field,'שמירת התשובה בשדה',function(v){s.field=v;}));card.append(row);}
+  box.append(card);});}
+function bfTrigger(t){BF.trigger=t;for(const b of document.querySelectorAll('[data-trigger]'))b.setAttribute('aria-pressed',String(b.dataset.trigger===t));$('bf-keyword').hidden=t!=='keyword';
+ $('bf-trigger-hint').textContent=t==='any'?'כל הודעה של לקוח שאינו באמצע שיחה מתחילה את התהליך. רק תהליך פעיל אחד במספר יכול לעבוד כך.':t==='keyword'?'הודעה שהיא מילת המפתח, או שמתחילה בה, מתחילה את התהליך.':'התהליך מתחיל רק כשבוחרים אותו בחלון שליחת הודעה. השלב הראשון נשלח לנמענים, ותשובותיהם ממשיכות את התהליך.';}
+function openFlow(id){const f=id?FLOWS.find(function(x){return x.id===id;}):null;BF=f?JSON.parse(JSON.stringify({id:f.id,trigger:f.trigger,steps:f.steps})):{id:null,trigger:'any',steps:[{id:'s1',type:'options',text:'',options:[{reply:'1',meaning:'',next:''},{reply:'2',meaning:'',next:''}]}]};
+ for(const s of BF.steps){if(s.type==='options'&&!s.options)s.options=[];}
+ $('bf-title').textContent=f?'עריכת תהליך':'תהליך חדש';$('bf-name').value=f?f.name:'';const sel=$('bf-number');sel.replaceChildren();for(const n of NUMBERS){const o=el('option','',n.label+' · '+local(n.number));o.value=n.number;sel.append(o);}if(f)sel.value=f.system_number;
+ $('bf-keyword').value=f&&f.keyword||'';$('bf-expire').value=String(f?f.expire_hours:24);$('bf-fallback').value=f?f.fallback:'';$('bf-active').checked=f?!!f.active:false;$('bf-delete').hidden=!f;$('bf-error').hidden=true;
+ bfTrigger(BF.trigger);renderSteps();$('bf-dlg').showModal();$('bf-name').focus();}
+for(const b of document.querySelectorAll('[data-trigger]'))b.addEventListener('click',function(){bfTrigger(b.dataset.trigger);});
+$('bf-add-step').addEventListener('click',function(){if(BF.steps.length>=30)return;BF.steps.push({id:newStepId(),type:'options',text:'',options:[{reply:'1',meaning:'',next:''},{reply:'2',meaning:'',next:''}]});renderSteps();});
+$('b-add').addEventListener('click',function(){openFlow(null);});
+$('b-rows').addEventListener('click',function(e){const a=e.target.closest('[data-answers]');if(a){openAnswers(Number(a.dataset.answers));return;}const tr=e.target.closest('tr[data-id]');if(tr)openFlow(Number(tr.dataset.id));});
+$('b-rows').addEventListener('keydown',function(e){if((e.key==='Enter'||e.key===' ')&&e.target.dataset.id){e.preventDefault();openFlow(Number(e.target.dataset.id));}});
+$('bf-form').addEventListener('submit',async function(e){e.preventDefault();$('bf-error').hidden=true;$('bf-save').disabled=true;
+ const steps=BF.steps.map(function(s){return s.type==='end'?{id:s.id,type:'end',text:s.text}:s.type==='text'?{id:s.id,type:'text',text:s.text,next:s.next||'',field:s.field||''}:{id:s.id,type:'options',text:s.text,options:s.options,field:s.field||''};});
+ try{const d=await post('/api/admin/flows/save',{id:BF.id,name:$('bf-name').value,system_number:$('bf-number').value,trigger:BF.trigger,keyword:$('bf-keyword').value,steps:steps,fallback:$('bf-fallback').value,expire_hours:Number($('bf-expire').value),active:$('bf-active').checked});
+  $('bf-dlg').close();toast(BF.id?'התהליך עודכן':'התהליך נוסף');void d;await loadFlows();}catch(err){dlgError('bf-error',err);}finally{$('bf-save').disabled=false;}});
+$('bf-delete').addEventListener('click',async function(){const id=BF.id;$('bf-dlg').close();if(!await confirmAction('מחיקת תהליך','למחוק את התהליך, את השיחות הפעילות בו ואת התשובות שנאספו? ההודעות עצמן לא יימחקו.','מחיקה'))return;
+ try{await post('/api/admin/flows/delete',{id:id});toast('התהליך נמחק');await loadFlows();}catch(err){error(err);}});
+async function openAnswers(id){const f=FLOWS.find(function(x){return x.id===id;});try{BA={flow:f,answers:(await get('/api/admin/flows/answers?id='+id)).answers};}catch(err){error(err);return;}
+ $('ba-title').textContent='תשובות: '+f.name+' ('+nf.format(BA.answers.length)+')';const body=$('ba-rows');body.replaceChildren();
+ for(const a of BA.answers.slice(0,1000)){const tr=el('tr');const who=el('td');who.append(el('span','phone',local(a.peer_number)));if(a.contact&&a.contact.name)who.append(el('span','sub-line',a.contact.name));
+  const q=el('td');q.append(el('div','mi-body',a.question));tr.append(cell(shortFmt.format(a.at),'muted'),who,q,cell(a.answer),cell(a.meaning||'—',a.meaning?'':'muted'));body.append(tr);}
+ if(!BA.answers.length){const tr=el('tr');const td=cell('עדיין אין תשובות','muted');td.colSpan=5;tr.append(td);body.append(tr);}$('ba-dlg').showModal();}
+$('ba-export').addEventListener('click',function(){if(!BA)return;const q=function(x){x=String(x==null?'':x);return /[",\r\n]/.test(x)||/^[=+\-@]/.test(x)?'"'+(/^[=+\-@]/.test(x)?"'":'')+x.replace(/"/g,'""')+'"':x;};
+ const names=SETTINGS.contact_fields;const head=['זמן','לקוח'].concat(names.map(function(f){return f.label;}),['שאלה','תשובה','משמעות']);
+ const lines=[head].concat(BA.answers.map(function(a){return [shortFmt.format(a.at),local(a.peer_number)].concat(names.map(function(f){return a.contact&&a.contact[f.id]||'';}),[a.question,a.answer,a.meaning||'']);}));
+ const blob=new Blob([String.fromCharCode(0xfeff)+lines.map(function(r){return r.map(q).join(',');}).join('\r\n')],{type:'text/csv;charset=utf-8'});const a=el('a');a.href=URL.createObjectURL(blob);a.download='bot-answers-'+today()+'.csv';document.body.append(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(a.href);},20000);});
+
+// Forwarding to webhooks: rules per system number and the recent delivery log.
+let FWD={rules:[],deliveries:[],max:10},FW=null;
+const FW_STATUS={delivered:['נמסר','good','check'],pending:['ממתין לניסיון נוסף','warn','clock'],failed:['נכשל','bad','x']};
+async function loadForwards(){const r=await Promise.all([get('/api/admin/forwards'),get('/api/admin/numbers')]);FWD={rules:r[0].rules,deliveries:r[0].deliveries,max:r[0].max_attempts};NUMBERS=r[1].numbers;renderForwards();}
+function hostOf(u){try{return new URL(u).host;}catch(e){return u;}}
+function renderForwards(){const body=$('f-rows');body.replaceChildren();
+ for(const f of FWD.rules){const tr=el('tr','click');tr.tabIndex=0;tr.dataset.id=String(f.id);const st=el('td');st.append(el('span','tag'+(f.active?'':' off'),f.active?'פעיל':'כבוי'));if(f.failed)st.append(' ',el('span','tag off',plural(f.failed,'משלוח אחד נכשל','משלוחים נכשלו')));if(f.pending)st.append(' ',el('span','tag',plural(f.pending,'אחד ממתין','ממתינים')));
+  tr.append(cell(f.name),cell(labelOf(f.system_number)),cell(f.senders.length?plural(f.senders.length,'שולח אחד','שולחים'):'כל השולחים',f.senders.length?'':'muted'),cell(f.url,'url-cell'),cell(f.format==='micropay'?'מיקרופיי':'JSON'),st);body.append(tr);}
+ if(!FWD.rules.length){const tr=el('tr');const td=cell('עדיין אין כללי העברה','muted');td.colSpan=6;tr.append(td);body.append(tr);}
+ const log=$('fl-rows');log.replaceChildren();const names=new Map(FWD.rules.map(function(f){return [f.id,f.name];}));
+ for(const d of FWD.deliveries){const tr=el('tr');const s=FW_STATUS[d.status];const b=el('span','badge '+s[1]);b.append(icon(s[2]),s[0]);const stc=el('td');stc.append(b);if(d.status==='pending'&&d.next_at)stc.append(el('span','sub-line','הניסיון הבא '+clockFmt.format(d.next_at)));
+  const last=el('td','muted');last.textContent=(d.last_status?'HTTP '+d.last_status:'')+(d.last_error?(d.last_status?' · ':'')+d.last_error:'')||'—';const act=el('td');
+  if(d.status!=='delivered'){const rb=el('button','ghost','שליחה מחדש');rb.type='button';rb.addEventListener('click',function(){resendDelivery(d.id,rb);});act.append(rb);}
+  const msg=el('td');msg.append(el('div','mi-body',d.body));tr.append(cell(shortFmt.format(d.created_at),'muted'),cell(names.get(d.rule_id)||'—'),cell(local(d.peer_number),'phone'),msg,stc,cell(nf.format(d.attempts)+' / '+nf.format(FWD.max),'muted'),last,act);log.append(tr);}
+ if(!FWD.deliveries.length){const tr=el('tr');const td=cell('עדיין לא נשלחו הודעות','muted');td.colSpan=8;tr.append(td);log.append(tr);}}
+function fwFormat(v){FW.format=v;for(const b of document.querySelectorAll('[data-fwformat]'))b.setAttribute('aria-pressed',String(b.dataset.fwformat===v));
+ $('fw-format-hint').textContent=v==='json'?'POST עם JSON: event, id, msgid, system_number, system_label, from, body, occurred_at, received_at, contact.':'POST בטופס, בדיוק כמו ה-Webhook של מיקרופיי: origsms, phone, dest, msgid. מתאים למערכת שכבר מקבלת הודעות ממיקרופיי.';}
+function openForward(id){const f=id?FWD.rules.find(function(x){return x.id===id;}):null;FW={id:f?f.id:null};$('fw-title').textContent=f?'עריכת כלל העברה':'כלל העברה חדש';
+ const sel=$('fw-number');sel.replaceChildren();for(const n of NUMBERS){const o=el('option','',n.label+' · '+local(n.number)+(n.active?'':' (מושבת)'));o.value=n.number;sel.append(o);}if(f)sel.value=f.system_number;
+ $('fw-name').value=f?f.name:'';$('fw-url').value=f?f.url:'';$('fw-senders').value=f?f.senders.map(local).join('\n'):'';$('fw-headers').value=f?Object.keys(f.headers).map(function(k){return k+': '+f.headers[k];}).join('\n'):'';
+ $('fw-active').checked=f?!!f.active:true;$('fw-secret-row').hidden=!f;$('fw-secret').value=f?f.secret:'';$('fw-delete').hidden=$('fw-test').hidden=!f;fwFormat(f?f.format:'json');$('fw-error').hidden=true;$('fw-dlg').showModal();$('fw-name').focus();}
+function fwPayload(){const headers={};for(const line of $('fw-headers').value.split('\n')){const t=line.trim();if(!t)continue;const i=t.indexOf(':');if(i<1)throw new Error('כותרת לא תקינה: '+t);headers[t.slice(0,i).trim()]=t.slice(i+1).trim();}
+ const senders=[];for(const v of $('fw-senders').value.split(/[,;\n]+/)){if(!v.trim())continue;const n=normalize(v);if(!n)throw new Error('מספר שולח לא תקין: '+v.trim());senders.push(n);}
+ return {id:FW.id,name:$('fw-name').value,system_number:$('fw-number').value,url:$('fw-url').value.trim(),senders:senders,format:FW.format,headers:headers,active:$('fw-active').checked};}
+for(const b of document.querySelectorAll('[data-fwformat]'))b.addEventListener('click',function(){fwFormat(b.dataset.fwformat);});
+$('f-add').addEventListener('click',function(){openForward(null);});
+$('f-rows').addEventListener('click',function(e){const tr=e.target.closest('tr[data-id]');if(tr)openForward(Number(tr.dataset.id));});
+$('f-rows').addEventListener('keydown',function(e){if((e.key==='Enter'||e.key===' ')&&e.target.dataset.id){e.preventDefault();openForward(Number(e.target.dataset.id));}});
+$('fw-form').addEventListener('submit',async function(e){e.preventDefault();$('fw-error').hidden=true;$('fw-save').disabled=true;
+ try{const d=await post('/api/admin/forwards/save',fwPayload());toast(FW.id?'הכלל עודכן':'הכלל נוסף');await loadForwards();if(!FW.id)openForward(d.id);else $('fw-dlg').close();}catch(err){dlgError('fw-error',err);}finally{$('fw-save').disabled=false;}});
+$('fw-test').addEventListener('click',async function(){const b=this;b.disabled=true;$('fw-error').hidden=true;
+ try{const d=await post('/api/admin/forwards/test',{id:FW.id});if(d.ok)toast('הבדיקה עברה: הכתובת ענתה HTTP '+d.status);else dlgError('fw-error',new Error('הבדיקה נכשלה: '+(d.status?'HTTP '+d.status+' · ':'')+(d.error||'')));}catch(err){dlgError('fw-error',err);}finally{b.disabled=false;}});
+$('fw-secret-new').addEventListener('click',async function(){if(!await confirmAction('החלפת מפתח החתימה','אחרי ההחלפה הצד המקבל צריך לעבור למפתח החדש, אחרת הוא ידחה את הבקשות.','החלפה'))return;
+ try{const d=await post('/api/admin/forwards/secret',{id:FW.id});$('fw-secret').value=d.secret;toast('המפתח הוחלף');await loadForwards();}catch(err){dlgError('fw-error',err);}});
+$('fw-delete').addEventListener('click',async function(){const id=FW.id;$('fw-dlg').close();if(!await confirmAction('מחיקת כלל העברה','למחוק את הכלל ואת יומן המשלוחים שלו? הודעות לא יימחקו.','מחיקה'))return;
+ try{await post('/api/admin/forwards/delete',{id:id});toast('הכלל נמחק');await loadForwards();}catch(err){error(err);}});
+async function resendDelivery(id,b){b.disabled=true;try{const d=await post('/api/admin/forwards/resend',{id:id});toast(d.ok?'נמסר בהצלחה':'השליחה נכשלה שוב'+(d.error?': '+d.error:''));await loadForwards();}catch(err){error(err);b.disabled=false;}}
 
 async function loadOptouts(){OPTOUTS=(await get('/api/admin/optouts')).optouts;renderOptouts();}
 function renderOptouts(){const q=$('o-q').value.replace(/[^0-9+]/g,'');const body=$('o-rows');body.replaceChildren();let shown=0;

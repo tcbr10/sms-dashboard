@@ -31,6 +31,7 @@ export async function readMicropay(request: Request): Promise<{event:Record<stri
  const event:Record<string,unknown>={event_id:text(payload.msgid,'msgid',256),system_number:vendorPhone(payload.dest),peer_number:vendorPhone(payload.phone),body:text(payload.origsms,'origsms',10000)};
  return {event,json:isJson};
 }
-export function micropayAcknowledgement(isJson:boolean):Response {
- return new Response(isJson?JSON.stringify({reply:''}):'OK',{status:200,headers:{'Content-Type':isJson?'application/json; charset=utf-8':'text/plain; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+// With no reply text, Micropay sends nothing. Reply text is sent to the customer as an SMS from the same number.
+export function micropayAcknowledgement(isJson:boolean,reply:string|null=null):Response {
+ return new Response(isJson?JSON.stringify({reply:reply??''}):reply??'OK',{status:200,headers:{'Content-Type':isJson?'application/json; charset=utf-8':'text/plain; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 }

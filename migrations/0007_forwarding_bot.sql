@@ -1,0 +1,12 @@
+CREATE TABLE forward_rules (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, system_number TEXT NOT NULL REFERENCES system_numbers(number), senders TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(senders)), url TEXT NOT NULL, format TEXT NOT NULL DEFAULT 'json' CHECK (format IN ('json','micropay')), headers TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(headers)), secret TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE INDEX idx_forward_rules_number ON forward_rules(system_number) WHERE active=1;
+CREATE TABLE deliveries (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id INTEGER NOT NULL, message_id INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('pending','delivered','failed')), attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER, last_status INTEGER, last_error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE (rule_id, message_id));
+CREATE INDEX idx_deliveries_due ON deliveries(next_at) WHERE status='pending';
+CREATE INDEX idx_deliveries_recent ON deliveries(id DESC);
+CREATE TABLE flows (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, system_number TEXT NOT NULL REFERENCES system_numbers(number), trigger TEXT NOT NULL CHECK (trigger IN ('any','keyword','send')), keyword TEXT, steps TEXT NOT NULL CHECK (json_valid(steps)), fallback TEXT NOT NULL DEFAULT '', expire_hours INTEGER NOT NULL DEFAULT 24, active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0,1)), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE conversations (system_number TEXT NOT NULL, peer_number TEXT NOT NULL, flow_id INTEGER NOT NULL, step TEXT NOT NULL, retries INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY (system_number, peer_number));
+CREATE INDEX idx_conversations_flow ON conversations(flow_id);
+CREATE TABLE bot_answers (id INTEGER PRIMARY KEY AUTOINCREMENT, flow_id INTEGER NOT NULL, system_number TEXT NOT NULL, peer_number TEXT NOT NULL, step TEXT NOT NULL, question TEXT NOT NULL, answer TEXT NOT NULL, meaning TEXT, message_id INTEGER, at INTEGER NOT NULL);
+CREATE INDEX idx_bot_answers_flow ON bot_answers(flow_id, id);
+CREATE INDEX idx_bot_answers_message ON bot_answers(message_id) WHERE message_id IS NOT NULL;
+CREATE TABLE bot_blocks (system_number TEXT NOT NULL, peer_number TEXT NOT NULL, created_at INTEGER NOT NULL, created_by TEXT NOT NULL, PRIMARY KEY (system_number, peer_number));

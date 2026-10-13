@@ -4,6 +4,7 @@ import {data} from './data';
 import {page,adminPage,noAccessPage,sessionEndedPage} from './page';
 import {loadUser,logout,me,prefs,touch} from './users';
 import {saveContact} from './contacts';
+import {botBlock,botInfo} from './flows';
 import {admin} from './admin';
 import {lists} from './lists';
 import {send,Fetcher} from './send';
@@ -24,11 +25,13 @@ export async function handle(request:Request,env:Env,who:string|Identity,options
   if (url.pathname==='/api/me/prefs') return prefs(request,env,user);
   if (url.pathname==='/api/me/logout') return logout(env,user);
   if (url.pathname==='/api/contacts/save') return saveContact(request,env,user);
+  if (url.pathname==='/api/bot/block') return botBlock(request,env,user);
   if (url.pathname.startsWith('/api/lists/')) return lists(request,url,env,user);
   if (url.pathname.startsWith('/api/admin/')) return admin(request,url,env,user,options.fetcher??((input,init)=>fetch(input,init)));
   throw new HttpError(404,'Not found'); }
  if (request.method!=='GET') throw new HttpError(405,'GET or POST required');
  if (url.pathname==='/api/me') return me(env,user);
+ if (url.pathname==='/api/bot/info') return botInfo(url,env,user);
  if (url.pathname==='/api/lists'||url.pathname.startsWith('/api/lists/')) return lists(request,url,env,user);
  if (url.pathname.startsWith('/api/admin/')) return admin(request,url,env,user,options.fetcher??((input,init)=>fetch(input,init)));
  if (url.pathname.startsWith('/api/')) return data(url,env,user);

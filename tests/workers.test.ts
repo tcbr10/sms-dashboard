@@ -1,7 +1,8 @@
 import {afterAll,beforeAll,beforeEach,describe,expect,it} from 'vitest';
 import {Miniflare} from 'miniflare';
 import {readFile,readdir} from 'node:fs/promises';
-import ingestion from '../workers/ingest/src/index';
+import ingestion,{ingest} from '../workers/ingest/src/index';
+import {runDue,MAX_ATTEMPTS} from '../shared/forwarding';
 import dashboard,{handle} from '../workers/dashboard/src/index';
 import {data} from '../workers/dashboard/src/data';
 import {User} from '../workers/dashboard/src/users';
@@ -12,7 +13,7 @@ let mf:Miniflare;let env:Env;
 const number='+972501234567',other='+972501234568',peer='+972509876543',token='a'.repeat(40),outToken='b'.repeat(40),message='שלום 👋\n& + "בדיקה" %20';
 beforeAll(async()=>{mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("test")}}',compatibilityDate:'2026-08-06',d1Databases:{DB:'sms-test'}});const bindings=await mf.getBindings();env={DB:bindings.DB as D1Database,INCOMING_TOKEN:token,OUTGOING_TOKEN:outToken};const dir=new URL('../migrations/',import.meta.url);for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(file,dir),'utf8')).split(';').filter(s=>s.trim()))await env.DB.prepare(sql).run();});
 afterAll(async()=>{await mf?.dispose();});
-beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','system_numbers','imports'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
+beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','imports','forward_rules','deliveries','flows','conversations','bot_answers','bot_blocks','system_numbers'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
 const user=(email:string,role:'admin'|'user'='user'):User=>({email,name:'',role,can_bulk_send:0,daily_limit:null,density:null,columns:null,test_number:null,sessions_revoked_at:null,can_edit_contacts:1});
 const ctx={waitUntil(){},passThroughOnException(){}} as unknown as ExecutionContext;
 function send(body:Record<string,unknown>,out=false,secret=out?outToken:token){return ingestion.fetch(new Request('https://ingest.test'+(out?'/events/outgoing':'/hooks/incoming'),{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+secret},body:JSON.stringify({event_id:'event-1',system_number:number,peer_number:peer,body:message,...body})}),env);}
@@ -162,6 +163,74 @@ describe('profile sign-out and contact editing by users',()=>{
   expect((await save(false)).status).toBe(200);expect(await body(api('alice@example.com','/api/me'))).toMatchObject({can_edit_contacts:false});expect((await api('alice@example.com','/api/contacts/save',{number:peer,data:{name:'x'}})).status).toBe(403);
   expect(((await body(api('admin@example.com','/api/admin/users'))).users as {email:string;can_edit_contacts:number}[]).find(u=>u.email==='alice@example.com')?.can_edit_contacts).toBe(0);
   expect((await save()).status).toBe(200);expect((await api('alice@example.com','/api/contacts/save',{number:peer,data:{name:'x'}})).status).toBe(200);});
+});
+describe('webhook forwarding',()=>{
+ type Call={url:string;init:RequestInit};
+ function hook(respond:(c:Call)=>Response|Promise<Response>=()=>new Response('ok')){const calls:Call[]=[];return {calls,fetcher:async(url:string,init:RequestInit)=>{const c={url,init};calls.push(c);return respond(c);}};}
+ const rule=(b:Record<string,unknown>={})=>api('admin@example.com','/api/admin/forwards/save',{name:'CRM',system_number:number,senders:[],url:'https://hooks.example.com/sms',format:'json',headers:{'X-Api-Key':'k1'},active:true,...b});
+ const incoming=(h:{fetcher:(u:string,i:RequestInit)=>Promise<Response>},patch:Record<string,string>={})=>ingest(callback('json',patch),env,{fetcher:h.fetcher}).catch(failure);
+ const deliveries=()=>env.DB.prepare('SELECT status,attempts,last_status,last_error,next_at FROM deliveries ORDER BY id').all<Record<string,unknown>>().then(r=>r.results);
+ async function sign(secret:string,body:string){const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);return 'sha256='+[...new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(body)))].map(b=>b.toString(16).padStart(2,'0')).join('');}
+ it('posts signed JSON for matching incoming messages only, once per message',async()=>{expect((await rule()).status).toBe(200);await rule({name:'VIP only',senders:['0521112222'],url:'https://vip.example.com/x'});
+  const h=hook();const r=await incoming(h);expect(r.status).toBe(200);expect(await r.text()).toBe('{"reply":""}');
+  expect(h.calls.map(c=>c.url)).toEqual(['https://hooks.example.com/sms']);const c=h.calls[0];const headers=c.init.headers as Record<string,string>;const sent=JSON.parse(String(c.init.body));
+  expect(sent).toMatchObject({event:'sms.incoming',msgid:'00705d38b642d5423',system_number:number,system_label:'Office',from:peer,body:message,contact:null});expect(headers['X-Api-Key']).toBe('k1');expect(headers['Content-Type']).toContain('application/json');
+  const secret=((await body(api('admin@example.com','/api/admin/forwards'))).rules as {secret:string}[])[0].secret;expect(headers['X-SMS-Signature']).toBe(await sign(secret,String(c.init.body)));
+  await incoming(h);expect(h.calls).toHaveLength(1);
+  await incoming(h,{msgid:'m2',phone:'0521112222'});expect(h.calls.map(c=>c.url)).toEqual(['https://hooks.example.com/sms','https://hooks.example.com/sms','https://vip.example.com/x']);
+  expect(await deliveries()).toEqual([{status:'delivered',attempts:1,last_status:200,last_error:null,next_at:null},{status:'delivered',attempts:1,last_status:200,last_error:null,next_at:null},{status:'delivered',attempts:1,last_status:200,last_error:null,next_at:null}]);});
+ it('sends Micropay\'s own format as a form post',async()=>{await rule({format:'micropay'});const h=hook();await incoming(h);const f=new URLSearchParams(String(h.calls[0].init.body));
+  expect(Object.fromEntries(f)).toEqual({origsms:message,phone:'0509876543',dest:'0501234567',msgid:'00705d38b642d5423'});expect((h.calls[0].init.headers as Record<string,string>)['Content-Type']).toContain('x-www-form-urlencoded');});
+ it('never lets a webhook failure affect receiving, and retries until it gives up',async()=>{await rule();const down=hook(()=>{throw new Error('connection refused');});
+  const r=await incoming(down);expect(r.status).toBe(200);expect((await read('alice@example.com')).messages).toHaveLength(1);
+  let d=(await deliveries())[0];expect(d).toMatchObject({status:'pending',attempts:1,last_status:null,last_error:'connection refused'});expect(Number(d.next_at)).toBeGreaterThan(Date.now()+50000);
+  expect(await runDue(env,down.fetcher)).toBe(0);
+  const err=hook(()=>new Response('server busy',{status:503}));for(let i=1;i<MAX_ATTEMPTS;i++){await env.DB.prepare('UPDATE deliveries SET next_at=0').run();await runDue(env,err.fetcher);}
+  d=(await deliveries())[0];expect(d).toMatchObject({status:'failed',attempts:MAX_ATTEMPTS,last_status:503,last_error:'server busy',next_at:null});
+  const id=((await body(api('admin@example.com','/api/admin/forwards'))).deliveries as {id:number}[])[0].id;const ok=hook();
+  expect(await body(handle(new Request(ORIGIN+'/api/admin/forwards/resend',{method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify({id})}),env,'admin@example.com',{fetcher:ok.fetcher}))).toEqual({ok:true,status:200,error:null});
+  expect((await deliveries())[0]).toMatchObject({status:'delivered'});});
+ it('validates rules, sends tests and is for admins only',async()=>{expect((await rule({url:'http://hooks.example.com'})).status).toBe(400);expect((await rule({headers:{'X-SMS-Signature':'x'}})).status).toBe(400);expect((await rule({senders:['bad']})).status).toBe(400);
+  expect((await api('alice@example.com','/api/admin/forwards')).status).toBe(403);const id=(await body(rule())).id;const h=hook(()=>new Response('nope',{status:401}));
+  expect(await body(handle(new Request(ORIGIN+'/api/admin/forwards/test',{method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify({id})}),env,'admin@example.com',{fetcher:h.fetcher}))).toEqual({ok:false,status:401,error:'nope'});
+  expect(JSON.parse(String(h.calls[0].init.body))).toMatchObject({test:true,id:0});
+  await api('admin@example.com','/api/admin/forwards/save',{id,name:'CRM',system_number:number,senders:[],url:'https://hooks.example.com/sms',format:'json',headers:{},active:false});const off=hook();await incoming(off);expect(off.calls).toHaveLength(0);
+  expect((await api('admin@example.com','/api/admin/forwards/delete',{id})).status).toBe(200);expect(await audits()).toEqual(['forward.save','forward.test','forward.save','forward.delete']);});
+});
+describe('auto-reply bot',()=>{
+ const steps=[{id:'s1',type:'options',text:'מעוניינים? 1 כן 2 לא',options:[{reply:'1, כן',meaning:'מעוניין',next:'s2'},{reply:'2',meaning:'לא מעוניין',next:'s4'}]},
+  {id:'s2',type:'options',text:'איזה סניף? 1 תל אביב 2 חיפה',options:[{reply:'1',meaning:'תל אביב',next:'s3'},{reply:'2',meaning:'חיפה',next:'s3'}]},
+  {id:'s3',type:'text',text:'מה השם המלא?',field:'name',next:'s5'},{id:'s5',type:'end',text:'תודה! נחזור אליך'},{id:'s4',type:'end',text:'תודה, לא נפנה שוב'}];
+ const flow=(b:Record<string,unknown>={})=>api('admin@example.com','/api/admin/flows/save',{name:'סקר',system_number:number,trigger:'any',steps,fallback:'',expire_hours:24,active:true,...b});
+ let n=0;const say=async(text:string,msgid=String(++n),from='0509876543')=>{const r=await ingest(callback('json',{origsms:text,msgid,phone:from}),env);expect(r.status).toBe(200);return (JSON.parse(await r.text()) as {reply:string}).reply;};
+ it('walks the flow, reading the same reply by the current question',async()=>{expect((await flow()).status).toBe(200);
+  expect(await say('שלום')).toBe('מעוניינים? 1 כן 2 לא');expect(await say('1')).toBe('איזה סניף? 1 תל אביב 2 חיפה');expect(await say(' 1.')).toBe('מה השם המלא?');expect(await say('דנה כהן')).toBe('תודה! נחזור אליך');
+  expect((await env.DB.prepare('SELECT step,answer,meaning FROM bot_answers ORDER BY id').all()).results).toEqual([{step:'s1',answer:'1',meaning:'מעוניין'},{step:'s2',answer:' 1.',meaning:'תל אביב'},{step:'s3',answer:'דנה כהן',meaning:null}]);
+  expect(await env.DB.prepare('SELECT data FROM contacts WHERE number=?').bind(peer).first()).toEqual({data:'{"name":"דנה כהן"}'});expect(await env.DB.prepare('SELECT 1 FROM conversations').first()).toBeNull();
+  const out=(await read('alice@example.com','?direction=out')).messages;expect(out.map(m=>m.body)).toEqual(['תודה! נחזור אליך','מה השם המלא?','איזה סניף? 1 תל אביב 2 חיפה','מעוניינים? 1 כן 2 לא']);expect(out.every(m=>m.sent_by==='בוט'&&m.submission_status==='accepted')).toBe(true);
+  expect(await say('שוב שלום')).toBe('מעוניינים? 1 כן 2 לא');});
+ it('repeats a question twice for an unknown reply, then stops; a repeated webhook call does not advance',async()=>{await flow();await say('היי');
+  expect(await say('אולי','dup')).toBe('לא זיהינו את התשובה.\nמעוניינים? 1 כן 2 לא');expect(await say('אולי','dup')).toBe('לא זיהינו את התשובה.\nמעוניינים? 1 כן 2 לא');
+  expect(await say('אולי')).toBe('לא זיהינו את התשובה.\nמעוניינים? 1 כן 2 לא');expect(await say('אולי')).toBe('');expect(await env.DB.prepare('SELECT 1 FROM conversations').first()).toBeNull();});
+ it('stops for opt-outs and blocked customers, expires idle conversations and prefers keyword flows',async()=>{await flow();await flow({name:'מבצע',trigger:'keyword',keyword:'מבצע',steps:[{id:'s1',type:'end',text:'פרטי המבצע: ...'}]});
+  expect(await say('מבצע עכשיו')).toBe('פרטי המבצע: ...');expect(await say('שלום')).toBe('מעוניינים? 1 כן 2 לא');
+  await env.DB.prepare('UPDATE conversations SET expires_at=1').run();expect(await say('2')).toBe('מעוניינים? 1 כן 2 לא');
+  expect(await say('הסר')).toBe('');expect(await say('1')).toBe('');expect(await env.DB.prepare('SELECT 1 FROM conversations').first()).toBeNull();
+  expect(await say('שלום','b1','0521112222')).toBe('מעוניינים? 1 כן 2 לא');expect((await api('alice@example.com','/api/bot/block',{system_number:number,peer_number:'0521112222',blocked:true})).status).toBe(200);
+  expect(await say('1','b2','0521112222')).toBe('');expect((await api('bob@example.com','/api/bot/block',{system_number:number,peer_number:'0521112222',blocked:false})).status).toBe(403);
+  await api('alice@example.com','/api/bot/block',{system_number:number,peer_number:'0521112222',blocked:false});expect(await say('1','b3','0521112222')).toBe('מעוניינים? 1 כן 2 לא');});
+ it('starts a flow from a dashboard send, or turns the bot off for the recipients',async()=>{const id=(await body(flow({trigger:'send'}))).id as number;await env.DB.prepare("UPDATE user_numbers SET can_send=1 WHERE email='alice@example.com'").run();
+  const calls:string[]=[];const fetcher=async(_u:string,init:RequestInit)=>{calls.push(JSON.parse(String(init.body)).msg);return new Response('OK 7');};
+  const sendAs=(b:Record<string,unknown>)=>handle(new Request(ORIGIN+'/api/send',{method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify({id:crypto.randomUUID(),system_number:number,recipients:[peer],body:'ignored',...b})}),{...env,MICROPAY_TOKEN:'t'},'alice@example.com',{fetcher}).catch(failure);
+  expect(((await body(api('alice@example.com','/api/me'))).flows as {id:number;first:string}[])).toEqual([{id,name:'סקר',system_number:number,first:'מעוניינים? 1 כן 2 לא'}]);
+  expect(await say('שלום')).toBe('');expect(await body(sendAs({flow_id:id}))).toMatchObject({status:'accepted'});expect(calls).toEqual(['מעוניינים? 1 כן 2 לא']);expect(await say('2')).toBe('תודה, לא נפנה שוב');
+  const answer=(await read('alice@example.com','?direction=in')).messages[0];expect(await body(api('alice@example.com','/api/bot/info?id='+answer.id))).toMatchObject({blocked:null,answer:{question:'מעוניינים? 1 כן 2 לא',answer:'2',meaning:'לא מעוניין',flow:'סקר'}});
+  await sendAs({flow_id:id});expect(await body(sendAs({body:'נציג אנושי כאן',stop_bot:true}))).toMatchObject({status:'accepted'});expect(await say('1')).toBe('');
+  expect(await body(api('alice@example.com','/api/bot/info?id='+answer.id))).toMatchObject({blocked:{created_by:'alice@example.com'},conversation:null});
+  expect((await sendAs({flow_id:999})).status).toBe(400);});
+ it('validates flows',async()=>{expect((await flow({steps:[{...steps[0],options:[{reply:'1',meaning:'',next:'s9'}]}]})).status).toBe(400);expect((await flow({steps:[{...steps[0],options:[{reply:'1',meaning:'',next:''},{reply:'כן, 1',meaning:'',next:''}]}]})).status).toBe(400);
+  expect((await flow({steps:[{id:'s1',type:'text',text:'שם?',field:'nope'}]})).status).toBe(400);expect((await flow()).status).toBe(200);expect((await flow({name:'שני'})).status).toBe(409);expect((await flow({name:'שני',active:false})).status).toBe(200);
+  expect((await api('alice@example.com','/api/admin/flows')).status).toBe(403);});
 });
 describe('Cloudflare Access sync',()=>{
  const policyId='policy-1',appId='app-1';
