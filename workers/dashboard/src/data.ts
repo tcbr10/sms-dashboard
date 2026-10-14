@@ -37,11 +37,21 @@ async function filters(p: URLSearchParams, env: Env, user: User, fields: Contact
  for (const f of fields) { const v=contains(p,'cf_'+f.id); if (v) { conditions.push('instr(lower('+contactExpr(f.id)+'),lower(?))>0');bindings.push(v); } }
  return {conditions,bindings};
 }
+// Export with one row per customer: every customer with messages matching the filters, their contact data, message
+// counts and their latest message. With a single max() aggregate, SQLite takes the bare columns from that latest row.
+const MAX_PEERS = 50000;
+async function peers(p: URLSearchParams, env: Env, user: User, conditions: string[], bindings: (string|number)[]): Promise<Response> {
+ if (p.get('export')!=='1') throw new HttpError(400,'Grouping is only for exports');
+ await audit(env,user.email,'export',null,{filters:Object.fromEntries([...p].filter(([k])=>!['export','limit','sort','order','columns','format','group'].includes(k))),columns:(p.get('columns')||'').split(',').filter(Boolean).slice(0,40),format:p.get('format')==='csv'?'csv':'xlsx',group:'peer'}).run();
+ const r=await env.DB.prepare(`SELECT m.peer_number,COUNT(*) AS total,SUM(m.direction='in') AS incoming,SUM(m.direction='out') AS outgoing,MAX(m.occurred_at) AS last_at,m.direction AS last_direction,m.body AS last_body,m.system_number AS last_number,c.data AS contact,EXISTS (SELECT 1 FROM opt_outs o WHERE o.number=m.peer_number) AS opted_out FROM messages m LEFT JOIN contacts c ON c.number=m.peer_number WHERE ${conditions.join(' AND ')} GROUP BY m.peer_number ORDER BY last_at DESC LIMIT ?`).bind(...bindings,MAX_PEERS+1).all<{contact:string|null}>();
+ return json({peers:r.results.slice(0,MAX_PEERS).map(x=>({...x,contact:x.contact?JSON.parse(x.contact):null})),truncated:r.results.length>MAX_PEERS});
+}
 export async function data(url: URL, env: Env, user: User): Promise<Response> {
  const p=url.searchParams; const fields=(await loadSettings(env.DB)).contact_fields;
  if (url.pathname === '/api/stats') { const {conditions,bindings}=await filters(p,env,user,fields); const from=conditions.some(c=>c.includes('c.data'))?COUNT_FROM:'messages m'; return json(await env.DB.prepare(`SELECT COUNT(*) AS total,COALESCE(SUM(m.direction='in'),0) AS incoming,COALESCE(SUM(m.direction='out'),0) AS outgoing,COUNT(DISTINCT m.peer_number) AS peers,COALESCE(MAX(m.id),0) AS max_id FROM ${from} WHERE ${conditions.join(' AND ')}`).bind(...bindings).first()); }
  if (url.pathname !== '/api/messages') throw new HttpError(404,'Not found');
  const {conditions,bindings}=await filters(p,env,user,fields);
+ if (p.get('group')==='peer') return peers(p,env,user,conditions,bindings);
  const sort=p.get('sort') || 'time'; const field=sort.startsWith('c:')?fields.find(f=>'c:'+f.id===sort):undefined; const sortExpr=sorts[sort] ?? (field?contactExpr(field.id):undefined); if (!sortExpr) throw new HttpError(400,'Invalid sort');
  const order=choice(p,'order',['asc','desc']) ?? 'desc'; const exporting=p.get('export')==='1';
  const limit=Number(p.get('limit') || 50); if(!Number.isInteger(limit)||limit<1||limit>(exporting?500:100)) throw new HttpError(400,'Invalid limit');

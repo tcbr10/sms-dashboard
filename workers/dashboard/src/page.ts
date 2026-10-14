@@ -129,7 +129,8 @@ const body = header('messages',true) + String.raw`
 <dialog id="export-dlg" aria-labelledby="ex-title"><form class="dialog-body" id="ex-form" novalidate>
  <div class="dialog-head"><h2 id="ex-title">ייצוא הודעות</h2><button type="button" class="icon-btn" id="ex-close" aria-label="סגירה">`+svg('close')+String.raw`</button></div>
  <div class="fld"><span class="label">פורמט</span><div class="seg" role="group" aria-label="פורמט"><button type="button" data-format="xlsx" aria-pressed="true">Excel</button><button type="button" data-format="csv" aria-pressed="false">CSV</button></div></div>
- <div class="fld"><span class="label">עמודות</span><div class="check-grid" id="ex-cols"></div></div>
+ <div class="fld"><span class="label">שורות</span><div class="seg" role="group" aria-label="שורות"><button type="button" data-rows="messages" aria-pressed="true">כל ההודעות</button><button type="button" data-rows="peers" aria-pressed="false">שורה אחת לכל מספר</button></div></div>
+ <div class="fld"><div class="row"><span class="label">עמודות</span><button type="button" class="ghost end" id="ex-all-fields">`+svg('columns')+String.raw`כל שדות אנשי הקשר</button></div><div class="check-grid" id="ex-cols"></div></div>
  <p class="hint" id="ex-count"></p>
  <div class="bar" id="ex-bar" hidden><div id="ex-progress"></div></div>
  <div class="banner" id="ex-error" role="alert" hidden></div>
@@ -381,15 +382,24 @@ for(const id of ['ce-close','ce-cancel'])$(id).addEventListener('click',function
 // Export: every message matching the current filters and sort, fetched page by page and turned into a file in the browser.
 let exportFormat='xlsx',exporting=false;
 const exportFmt=new Intl.DateTimeFormat('he-IL',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
-function openExport(){const box=$('ex-cols');box.replaceChildren();for(const c of COLS){const l=el('label','check');const cb=el('input');cb.type='checkbox';cb.value=c.id;cb.checked=visible.includes(c.id);l.append(cb,c.label);box.append(l);}
- $('ex-count').textContent=total!==null?'ייוצאו '+nf.format(Math.min(total,50000))+' הודעות לפי הסינון והמיון הנוכחיים'+(total>50000?' (עד 50,000)':'')+'.':'ייוצאו כל ההודעות לפי הסינון והמיון הנוכחיים.';
+// Two kinds of export: every message (one row per message), or one row per customer with their contact data,
+// message counts and latest message, grouped on the server.
+let exportRows='messages';
+function peerCols(){return [{id:'peer',label:'לקוח'}].concat(ME.contact_fields.map(function(f){return {id:'c:'+f.id,field:f.id,label:f.label};}),[{id:'total',label:'מספר הודעות'},{id:'incoming',label:'נכנסות'},{id:'outgoing',label:'יוצאות'},{id:'last_at',label:'הודעה אחרונה'},{id:'last_direction',label:'כיוון ההודעה האחרונה'},{id:'last_body',label:'תוכן ההודעה האחרונה'},{id:'last_number',label:'מספר מערכת אחרון'},{id:'opted_out',label:'ברשימת ההסרה'}]);}
+function exportCols(){return exportRows==='peers'?peerCols():COLS;}
+function renderExportCols(){const box=$('ex-cols');box.replaceChildren();const pick=exportRows==='peers'?function(c){return c.id==='peer'||c.id==='total'||c.id==='last_at'||c.id==='last_body'||(c.field&&visible.includes(c.id));}:function(c){return visible.includes(c.id);};
+ for(const c of exportCols()){const l=el('label','check');const cb=el('input');cb.type='checkbox';cb.value=c.id;cb.checked=pick(c);l.append(cb,c.label);box.append(l);}$('ex-all-fields').hidden=!ME.contact_fields.length;
+ $('ex-count').textContent=exportRows==='peers'?(S&&S.peers!==undefined?'ייוצאו '+nf.format(Math.min(S.peers,50000))+' לקוחות, שורה אחת לכל מספר, לפי הסינון הנוכחי.':'ייוצא כל לקוח שיש לו הודעות לפי הסינון הנוכחי, שורה אחת לכל מספר.'):total!==null?'ייוצאו '+nf.format(Math.min(total,50000))+' הודעות לפי הסינון והמיון הנוכחיים'+(total>50000?' (עד 50,000)':'')+'.':'ייוצאו כל ההודעות לפי הסינון והמיון הנוכחיים.';}
+for(const b of document.querySelectorAll('[data-rows]'))b.addEventListener('click',function(){exportRows=b.dataset.rows;for(const x of document.querySelectorAll('[data-rows]'))x.setAttribute('aria-pressed',String(x===b));renderExportCols();});
+$('ex-all-fields').addEventListener('click',function(){for(const cb of $('ex-cols').querySelectorAll('input'))if(cb.value.indexOf('c:')===0)cb.checked=true;});
+function openExport(){renderExportCols();
  $('ex-error').hidden=true;$('ex-bar').hidden=true;$('ex-status').textContent='';$('ex-go').disabled=false;$('export-dlg').showModal();}
 for(const b of document.querySelectorAll('[data-format]'))b.addEventListener('click',function(){exportFormat=b.dataset.format;for(const x of document.querySelectorAll('[data-format]'))x.setAttribute('aria-pressed',String(x===b));});
 function exportValue(c,m){switch(c.id){case 'time':return exportFmt.format(m.occurred_at);case 'received':return exportFmt.format(m.received_at);case 'direction':return DIR[m.direction];case 'peer':return local(m.peer_number);
  case 'number':return (labels.get(m.system_number)?labels.get(m.system_number)+' ':'')+local(m.system_number);case 'body':return m.body;case 'status':return (m.direction==='out'&&STATUS[m.submission_status]?STATUS[m.submission_status][0]:'')+(m.is_test?' (בדיקה)':'');case 'sent_by':return m.sent_by||'';default:return (m.contact&&m.contact[c.field])||'';}}
 // CSV cells that start like a formula are prefixed with ' so spreadsheet apps show them as text.
 function csvCell(v,safe){let s=String(v==null?'':v);if(!safe&&/^[=+\-@\t\r]/.test(s))s="'"+s;return /[",\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
-function csvBlob(defs,head,data){const safe=defs.map(function(c){return ['time','received','peer','number'].includes(c.id);});const lines=[head].concat(data).map(function(r){return r.map(function(v,i){return csvCell(v,safe[i]);}).join(',');});return new Blob([String.fromCharCode(0xfeff)+lines.join('\r\n')],{type:'text/csv;charset=utf-8'});}
+function csvBlob(defs,head,data){const safe=defs.map(function(c){return ['time','received','peer','number','last_at','last_number','total','incoming','outgoing'].includes(c.id);});const lines=[head].concat(data).map(function(r){return r.map(function(v,i){return csvCell(v,safe[i]);}).join(',');});return new Blob([String.fromCharCode(0xfeff)+lines.join('\r\n')],{type:'text/csv;charset=utf-8'});}
 const CRC=(function(){const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
 function crc32(u8){let c=0xFFFFFFFF;for(let i=0;i<u8.length;i++)c=CRC[(c^u8[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
 // Minimal zip writer (deflate via the browser's CompressionStream) for the .xlsx package.
@@ -411,6 +421,7 @@ function xlsxBlob(head,data,widths){const NS='http://schemas.openxmlformats.org/
 function download(blob,name){const a=el('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.append(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(a.href);},20000);}
 $('ex-form').addEventListener('submit',async function(e){e.preventDefault();if(exporting)return;const ids=Array.from($('ex-cols').querySelectorAll('input:checked')).map(function(i){return i.value;});
  if(!ids.length){$('ex-error').hidden=false;$('ex-error').textContent='יש לבחור לפחות עמודה אחת';return;}
+ if(exportRows==='peers'){exportPeers(ids);return;}
  exporting=true;$('ex-go').disabled=true;$('ex-error').hidden=true;$('ex-bar').hidden=false;$('ex-progress').style.width='0';const defs=order(ids).map(col);const found=[];let cursor=null;
  try{const base=query(true);base.set('limit','500');base.set('export','1');base.set('format',exportFormat);base.set('columns',defs.map(function(c){return c.id;}).join(','));
   for(;;){const p=new URLSearchParams(base);if(cursor)p.set('cursor',cursor);const d=await get('/api/messages?'+p);for(const m of d.messages)found.push(m);cursor=d.next_cursor;
@@ -419,6 +430,16 @@ $('ex-form').addEventListener('submit',async function(e){e.preventDefault();if(e
   download(exportFormat==='csv'?csvBlob(defs,head,data):await xlsxBlob(head,data,defs.map(function(c){return {body:60,direction:9,status:14,sent_by:28,number:24,peer:15,time:20,received:20}[c.id]||18;})),'sms-'+today()+'.'+exportFormat);$('export-dlg').close();toast('יוצאו '+nf.format(data.length)+' הודעות');}
  catch(err){$('ex-error').hidden=false;$('ex-error').textContent=message(err);}
  finally{exporting=false;$('ex-go').disabled=false;}});
+function peerValue(c,r){switch(c.id){case 'peer':return local(r.peer_number);case 'total':return String(r.total);case 'incoming':return String(r.incoming);case 'outgoing':return String(r.outgoing);case 'last_at':return exportFmt.format(r.last_at);
+ case 'last_direction':return DIR[r.last_direction];case 'last_body':return r.last_body;case 'last_number':return (labels.get(r.last_number)?labels.get(r.last_number)+' ':'')+local(r.last_number);case 'opted_out':return r.opted_out?'כן':'לא';default:return (r.contact&&r.contact[c.field])||'';}}
+async function exportPeers(ids){exporting=true;$('ex-go').disabled=true;$('ex-error').hidden=true;$('ex-bar').hidden=false;$('ex-progress').style.width='30%';$('ex-status').textContent='מקבץ לפי מספר…';
+ const all=peerCols();const defs=all.filter(function(c){return ids.includes(c.id);});
+ try{const p=query(true);p.set('export','1');p.set('group','peer');p.set('format',exportFormat);p.set('columns',defs.map(function(c){return c.id;}).join(','));const d=await get('/api/messages?'+p);
+  const head=defs.map(function(c){return c.label;});const data=d.peers.map(function(r){return defs.map(function(c){return peerValue(c,r);});});$('ex-progress').style.width='80%';$('ex-status').textContent='יוצר קובץ…';
+  download(exportFormat==='csv'?csvBlob(defs,head,data):await xlsxBlob(head,data,defs.map(function(c){return {peer:15,last_body:60,last_at:20,last_number:24,last_direction:12,total:10,incoming:10,outgoing:10,opted_out:12}[c.id]||18;})),'contacts-'+today()+'.'+exportFormat);
+  $('export-dlg').close();toast('יוצאו '+plural(data.length,'לקוח אחד','לקוחות')+(d.truncated?' (עד 50,000)':''));}
+ catch(err){$('ex-error').hidden=false;$('ex-error').textContent=message(err);}
+ finally{exporting=false;$('ex-go').disabled=false;}}
 $('export-btn').addEventListener('click',openExport);
 for(const id of ['ex-close','ex-cancel'])$(id).addEventListener('click',function(){$('export-dlg').close();});
 

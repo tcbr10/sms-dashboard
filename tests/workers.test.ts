@@ -288,6 +288,20 @@ describe('Cloudflare Access sync',()=>{
  it('does nothing when not configured',async()=>{expect(await body(api('admin@example.com','/api/admin/users/save',{...save('new@example.com',true),create:true}))).toEqual({ok:true,access:null});
   expect((await api('admin@example.com','/api/admin/users/access-sync',{})).status).toBe(503);});
 });
+describe('export with one row per number',()=>{
+ it('groups messages by customer with contact data, counts, the latest message and opt-out state',async()=>{const at=(n:number)=>new Date(Date.UTC(2026,9,1,8,n)).toISOString();
+  await send({event_id:'g1',body:'ראשונה',occurred_at:at(1)});await send({event_id:'g2',body:'אחרונה',occurred_at:at(3)});await send({event_id:'g3',body:'תשובה',occurred_at:at(2),submission_status:'accepted'},true);
+  await send({event_id:'g4',peer_number:'+972521112222',body:'שלום',occurred_at:at(5)});await send({event_id:'g5',system_number:other,peer_number:'+972531112222',body:'מכירות',occurred_at:at(6)});
+  await api('admin@example.com','/api/admin/contacts/save',{number:peer,data:{name:'דנה',id_number:'123'}});await api('admin@example.com','/api/admin/optouts/add',{numbers:['0521112222']});
+  const all=await body(api('alice@example.com','/api/messages?export=1&group=peer&columns=peer,c:name'));
+  expect(all).toEqual({truncated:false,peers:[{peer_number:'+972531112222',total:1,incoming:1,outgoing:0,last_at:Date.parse(at(6)),last_direction:'in',last_body:'מכירות',last_number:other,contact:null,opted_out:0},
+   {peer_number:'+972521112222',total:1,incoming:1,outgoing:0,last_at:Date.parse(at(5)),last_direction:'in',last_body:'שלום',last_number:number,contact:null,opted_out:1},
+   {peer_number:peer,total:3,incoming:2,outgoing:1,last_at:Date.parse(at(3)),last_direction:'in',last_body:'אחרונה',last_number:number,contact:{name:'דנה',id_number:'123'},opted_out:0}]});
+  expect(((await body(api('alice@example.com','/api/messages?export=1&group=peer&direction=out'))).peers as {peer_number:string;total:number}[]).map(r=>[r.peer_number,r.total])).toEqual([[peer,1]]);
+  expect(((await body(api('bob@example.com','/api/messages?export=1&group=peer'))).peers as {peer_number:string}[]).map(r=>r.peer_number)).toEqual(['+972531112222']);
+  expect((await api('alice@example.com','/api/messages?group=peer')).status).toBe(400);
+  expect((await env.DB.prepare("SELECT details FROM audit_log WHERE action='export' ORDER BY id LIMIT 1").first<{details:string}>())!.details).toContain('"group":"peer"');});
+});
 describe('contact fields limit',()=>{
  it('allows 20 contact fields, refuses 21, and lets users show them all as columns',async()=>{const fields=(n:number)=>Array.from({length:n},(_,i)=>({id:'f'+i,label:'שדה '+(i+1)}));
   expect((await api('admin@example.com','/api/admin/settings',{contact_fields:fields(21)})).status).toBe(400);expect((await api('admin@example.com','/api/admin/settings',{contact_fields:fields(20)})).status).toBe(200);
