@@ -288,6 +288,36 @@ describe('Cloudflare Access sync',()=>{
  it('does nothing when not configured',async()=>{expect(await body(api('admin@example.com','/api/admin/users/save',{...save('new@example.com',true),create:true}))).toEqual({ok:true,access:null});
   expect((await api('admin@example.com','/api/admin/users/access-sync',{})).status).toBe(503);});
 });
+describe('view restrictions',()=>{
+ const T=Date.UTC(2026,9,10,12,0);const A='+972521000001',B='+972521000002',C='+972521000003';
+ beforeEach(async()=>{const ins=(key:string,peer_:string,body_:string,at:number,dir='in',sys=number)=>env.DB.prepare("INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,updated_at) VALUES (?,?,?,?,?,?,?,'receipt',?,?)").bind(key,dir,sys,peer_,body_,at,at,dir==='out'?'accepted':null,at);
+  await env.DB.batch([ins('old',A,'ישנה',T-3600000),ins('newA',A,'חדשה',T+1000),ins('newB',B,'שלום',T+2000),ins('newC',C,'כן',T+3000),ins('outA',A,'תשובה',T+4000,'out'),ins('urgent',A,'דחוף מאוד',T+5000),ins('sales',B,'מכירות',T-7200000,'in',other),
+   env.DB.prepare("INSERT INTO contacts (number,data,updated_at) VALUES (?,'{\"name\":\"מצפה רמון\"}',1)").bind(B),
+   env.DB.prepare("INSERT INTO bot_answers (flow_id,system_number,peer_number,step,question,answer,meaning,at) VALUES (1,?,?,'s1','q','1','מעוניין',1)").bind(number,C)]);});
+ const limit=(view_from:number|null,view_rules:unknown)=>api('admin@example.com','/api/admin/users/save',{email:'alice@example.com',role:'user',active:true,can_bulk_send:false,daily_limit:null,numbers:[{number,can_send:true,view_from,view_rules},{number:other,can_send:false}]});
+ const seen=async(q='')=>(await read('alice@example.com',q)).messages.map(m=>m.body).sort();
+ it('limits by start date and by each kind of condition, all of which must match',async()=>{
+  expect((await limit(T,null)).status).toBe(200);expect(await seen()).toEqual(['דחוף מאוד','חדשה','כן','מכירות','שלום','תשובה'].sort());
+  await limit(null,[{type:'field',field:'name',op:'eq',value:'מצפה רמון'}]);expect(await seen()).toEqual(['מכירות','שלום']);
+  await limit(null,[{type:'answer',op:'eq',value:'מעוניין'}]);expect(await seen()).toEqual(['כן','מכירות']);
+  await limit(null,[{type:'text',value:'דחוף'}]);expect(await seen()).toEqual(['דחוף מאוד','מכירות']);
+  await limit(null,[{type:'direction',value:'out'}]);expect(await seen()).toEqual(['מכירות','תשובה']);
+  await limit(T,[{type:'direction',value:'in'},{type:'field',field:'name',op:'contains',value:'רמון'}]);expect(await seen()).toEqual(['מכירות','שלום']);
+  expect(((await body(api('alice@example.com','/api/me'))).numbers as {number:string;restricted:number}[]).map(n=>[n.number,n.restricted])).toEqual([[number,1],[other,0]]);
+  expect(((await body(api('admin@example.com','/api/admin/users'))).users as {email:string;numbers:{view_from:number|null;view_rules:unknown}[]}[]).find(u=>u.email==='alice@example.com')!.numbers).toEqual(expect.arrayContaining([expect.objectContaining({view_from:T,view_rules:[{type:'direction',value:'in'},{type:'field',field:'name',op:'contains',value:'רמון'}]})]));});
+ it('applies the same limits to counts, export, live updates, conversations, bot state and contact edits',async()=>{await limit(T,[{type:'field',field:'name',op:'eq',value:'מצפה רמון'}]);
+  expect(await body(api('alice@example.com','/api/stats'))).toMatchObject({total:2,peers:1});
+  expect(((await body(api('alice@example.com','/api/messages?export=1&group=peer'))).peers as {peer_number:string}[]).map(r=>r.peer_number)).toEqual([B]);
+  expect((await read('alice@example.com','?since='+encodeCursor({t:0,id:0}))).messages.map(m=>m.body).sort()).toEqual(['מכירות','שלום']);
+  expect((await read('alice@example.com','?peer_number='+encodeURIComponent(A))).messages).toHaveLength(0);
+  const hidden=(await env.DB.prepare("SELECT id FROM messages WHERE event_key='newA'").first<{id:number}>())!.id;const shown=(await env.DB.prepare("SELECT id FROM messages WHERE event_key='newB'").first<{id:number}>())!.id;
+  expect((await api('alice@example.com','/api/bot/info?id='+hidden)).status).toBe(404);expect((await api('alice@example.com','/api/bot/info?id='+shown)).status).toBe(200);
+  expect((await api('alice@example.com','/api/bot/block',{system_number:number,peer_number:A,blocked:true})).status).toBe(403);expect((await api('alice@example.com','/api/bot/block',{system_number:number,peer_number:B,blocked:true})).status).toBe(200);
+  expect((await api('alice@example.com','/api/contacts/save',{number:A,data:{name:'x'}})).status).toBe(403);expect((await api('alice@example.com','/api/contacts/save',{number:B,data:{id_number:'5'}})).status).toBe(200);
+  expect(((await body(api('admin@example.com','/api/messages'))).messages as unknown[])).toHaveLength(7);});
+ it('validates conditions',async()=>{expect((await limit(null,[{type:'field',field:'nope',op:'eq',value:'x'}])).status).toBe(400);expect((await limit(null,[{type:'text',value:''}])).status).toBe(400);
+  expect((await limit(null,[{type:'direction',value:'both'}])).status).toBe(400);expect((await limit(-5,null)).status).toBe(400);expect((await limit(null,Array.from({length:11},()=>({type:'text',value:'a'})))).status).toBe(400);});
+});
 describe('export with one row per number',()=>{
  it('groups messages by customer with contact data, counts, the latest message and opt-out state',async()=>{const at=(n:number)=>new Date(Date.UTC(2026,9,1,8,n)).toISOString();
   await send({event_id:'g1',body:'ראשונה',occurred_at:at(1)});await send({event_id:'g2',body:'אחרונה',occurred_at:at(3)});await send({event_id:'g3',body:'תשובה',occurred_at:at(2),submission_status:'accepted'},true);

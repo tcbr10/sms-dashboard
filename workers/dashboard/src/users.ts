@@ -2,13 +2,13 @@ import {Env,HttpError,json,readBody,recipient} from '../../../shared/validation'
 import {loadSettings} from '../../../shared/settings';
 import {Flow,parseFlow} from '../../../shared/bot';
 export type User = {email:string;name:string;role:'admin'|'user';can_bulk_send:number;daily_limit:number|null;density:string|null;columns:string|null;test_number:string|null;sessions_revoked_at:number|null;can_edit_contacts:number};
-export type Access = {number:string;label:string;can_send:number};
+export type Access = {number:string;label:string;can_send:number;restricted:number};
 const DAY = 86400000;
 // Only active users get in; Cloudflare Access proves the email, this table decides whether it may use the dashboard.
 export async function loadUser(env: Env, email: string): Promise<User|null> { return env.DB.prepare('SELECT email,name,role,can_bulk_send,daily_limit,density,columns,test_number,sessions_revoked_at,can_edit_contacts FROM users WHERE email=? AND active=1').bind(email).first<User>(); }
 // Admins see and may send from every active number; users only from their assignments.
 export async function numbersFor(env: Env, user: User): Promise<Access[]> {
- const result = user.role === 'admin' ? await env.DB.prepare('SELECT number,label,1 AS can_send FROM system_numbers WHERE active=1 ORDER BY label,number').all<Access>() : await env.DB.prepare('SELECT s.number,s.label,u.can_send FROM system_numbers s JOIN user_numbers u ON u.system_number=s.number WHERE u.email=? AND s.active=1 ORDER BY s.label,s.number').bind(user.email).all<Access>();
+ const result = user.role === 'admin' ? await env.DB.prepare('SELECT number,label,1 AS can_send,0 AS restricted FROM system_numbers WHERE active=1 ORDER BY label,number').all<Access>() : await env.DB.prepare('SELECT s.number,s.label,u.can_send,(u.view_from IS NOT NULL OR u.view_rules IS NOT NULL) AS restricted FROM system_numbers s JOIN user_numbers u ON u.system_number=s.number WHERE u.email=? AND s.active=1 ORDER BY s.label,s.number').bind(user.email).all<Access>();
  return result.results;
 }
 export async function sentLast24h(env: Env, email: string): Promise<number> { const r = await env.DB.prepare("SELECT COALESCE(SUM(recipients),0) AS n FROM sends WHERE email=? AND created_at>? AND status!='rejected'").bind(email, Date.now()-DAY).first<{n:number}>(); return r?.n ?? 0; }

@@ -106,7 +106,7 @@ const body = header('messages',true) + String.raw`
    <div class="empty" id="empty" hidden>`+svg('chat')+String.raw`<p class="empty-title" id="empty-title"></p><p id="empty-sub"></p><button type="button" class="ghost" id="empty-clear" hidden>ניקוי כל הסינונים</button></div>
    <div class="more-row" id="more-row" hidden><button type="button" class="more" id="more">טעינת הודעות נוספות</button></div>
   </div>
-  <div class="foot"><span id="count"></span><span>הזמנים לפי שעון ישראל · הודעות יוצאות מוצגות רק ממערכות שמדווחות עליהן<span id="updated"></span></span></div>
+  <div class="foot"><span id="count"></span><span>הזמנים לפי שעון ישראל · הודעות יוצאות מוצגות רק ממערכות שמדווחות עליהן<span id="updated"></span><span id="restricted-note" hidden> · חלק מההודעות מוצגות לפי הגבלות הצפייה שלך</span></span></div>
  </section>
 </main>
 <dialog id="compose" aria-labelledby="c-title"><form class="dialog-body" id="c-form" novalidate>
@@ -569,7 +569,7 @@ $('new').addEventListener('click',function(){openCompose();});
 
 title();
 (async function(){try{await loadMe();noNumbers=!ME.numbers.length;for(const n of ME.numbers)labels.set(n.number,n.label);
-  buildColumns();readUrl();$('q').value=state.q;const canSendAny=senders().length>0;$('new').hidden=!canSendAny;$('lists-btn').hidden=!canSendAny;}
+  $('restricted-note').hidden=!ME.numbers.some(function(n){return n.restricted;});buildColumns();readUrl();$('q').value=state.q;const canSendAny=senders().length>0;$('new').hidden=!canSendAny;$('lists-btn').hidden=!canSendAny;}
  catch(e){fail(e,true);return;}
  await load();schedule();})();
 `;

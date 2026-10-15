@@ -48,13 +48,14 @@ The README documents setup, routes, field mapping and operations in detail.
 | `shared/bot.ts` | Bot engine: conversation state, option matching, replies, answers |
 | `workers/dashboard/src/forwards.ts` | `/api/admin/forwards*`: rules, delivery log, test, resend |
 | `workers/dashboard/src/flows.ts` | `/api/admin/flows*` (admins), `/api/bot/info` and `/api/bot/block` (users) |
+| `workers/dashboard/src/scope.ts` | Which messages a user may see: assigned numbers plus per-number view restrictions; used by every message query |
 | `workers/dashboard/src/send.ts` | `/api/send`: permission and limit checks, idempotent send ID, Micropay call, per-recipient rows |
 | `workers/dashboard/src/ui.ts` | Shared CSS, header, icons and browser helpers (requests, popover menus, confirm dialog, CSV/Excel reader); the no-access and session-ended pages |
 | `workers/dashboard/src/page.ts` | Messages page: columns and header menus, export (CSV and a small .xlsx writer), lists, compose panel with test sends |
 | `workers/dashboard/src/admin-page.ts` | Admin page |
 | `shared/validation.ts` | `Env`, phone and recipient normalization, body reading, cursors |
 | `shared/settings.ts` | Settings defaults and validation, opt-out word matching (also used by ingest) |
-| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id`; `0007_forwarding_bot.sql` forwarding rules and deliveries, bot flows, conversations, answers and blocks; `0008_bot_reply_via.sql` per-number bot reply method |
+| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id`; `0007_forwarding_bot.sql` forwarding rules and deliveries, bot flows, conversations, answers and blocks; `0008_bot_reply_via.sql` per-number bot reply method; `0009_view_restrictions.sql` per-assignment view start and conditions |
 | `tests/workers.test.ts` | Miniflare D1 tests: ingest, isolation, table queries, access, admin, sending (fake Micropay) |
 | `scripts/preview.ts` | Local preview with seeded data, live inserts and a fake Micropay (`npm run preview`; `PREVIEW_USER=agent@example.com` for a regular user) |
 
@@ -84,6 +85,7 @@ The README documents setup, routes, field mapping and operations in detail.
 - **The bot answers through Micropay's webhook response,** which Micropay sends as an SMS from the same number. No API call or token is needed in ingest, but only messages that come through `/hooks/micropay/incoming` get replies. Bot errors are caught and mean "no reply"; they never fail the callback.
 - **Forwarding runs after the response** (`ctx.waitUntil`) and its retries run on the ingest cron. Each delivery claims itself by pushing `next_at` a minute ahead, so the cron and an immediate try never send the same delivery at once. A cron run handles at most 10 deliveries because of the free plan's 50 queries per invocation.
 - **The Micropay route repairs automation JSON.** Automations paste the message into their JSON template unescaped; raw control characters are escaped and, failing that, known fields are read by name (`lenientJson` in `micropay.ts`). Keep other routes strict.
+- **Every message query must start from `scope()`** (scope.ts). It returns the user's visibility SQL, including view restrictions, and needs contacts joined as `c`. Unrestricted users keep the single `+m.system_number IN (…)` condition, so their queries are unchanged.
 - **Statements over many rows use `json_each`** (imports, flow starts, bot blocks) rather than one statement per row, for the same 50-query limit.
 - **Lists are expanded in the browser** into recipients; the send endpoint stays the single place that validates and limits recipients.
 - **Cursors are UTF-8 base64url**, because contact sort values can be Hebrew.
@@ -167,6 +169,11 @@ Found on 2026-10-13: messages on the bot's number come from a Micropay automatio
 2. Done: deployed ingest, then the dashboard.
 3. The owner adds the Micropay API token to ingest: `npx wrangler secret put MICROPAY_TOKEN --config workers/ingest/wrangler.jsonc` (the same token the dashboard uses).
 4. On the numbers tab, set the bot number's "תשובות הבוט נשלחות" to "דרך ממשק השליחה".
+
+## Rollout of view restrictions
+
+1. Apply `0009` (`npm run db:migrate`) **before** deploying the dashboard, because it reads the new user_numbers columns.
+2. Deploy the dashboard. Ingest is unchanged.
 
 ## Micropay automation webhook
 

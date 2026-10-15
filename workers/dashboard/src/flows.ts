@@ -1,7 +1,8 @@
 import {Env,HttpError,json,phone,readBody,text} from '../../../shared/validation';
 import {loadSettings} from '../../../shared/settings';
 import {Flow,Step,normalizeReply,parseFlow} from '../../../shared/bot';
-import {User,audit,numbersFor} from './users';
+import {User,audit} from './users';
+import {seesCustomer,seesMessage} from './scope';
 // Bot flows: admins build them; users see a customer's bot state in the messages table and can turn the bot off or on
 // for a customer of their numbers.
 const STEP_ID = /^s[0-9]{1,3}$/;
@@ -24,12 +25,11 @@ function steps(value: unknown, fields: Set<string>): Step[] {
   return {id:s.id as string,text:t,type,options,field:field(s.field)};
  });
 }
-async function canUse(env: Env, user: User, system: string): Promise<boolean> { return (await numbersFor(env,user)).some(n => n.number === system); }
 // GET /api/bot/info?id=<message id>: the customer's bot state for that message's conversation, and the bot answer it gave.
 export async function botInfo(url: URL, env: Env, user: User): Promise<Response> {
  const id = Number(url.searchParams.get('id')); if (!Number.isSafeInteger(id)) throw new HttpError(400,'Invalid id');
  const m = await env.DB.prepare('SELECT system_number,peer_number FROM messages WHERE id=?').bind(id).first<{system_number:string;peer_number:string}>();
- if (!m || !await canUse(env,user,m.system_number)) throw new HttpError(404,'Message not found');
+ if (!m || !await seesMessage(env,user,id)) throw new HttpError(404,'Message not found');
  const [blocked,answer,conv] = await Promise.all([
   env.DB.prepare('SELECT created_by,created_at FROM bot_blocks WHERE system_number=? AND peer_number=?').bind(m.system_number,m.peer_number).first(),
   env.DB.prepare('SELECT a.question,a.answer,a.meaning,f.name AS flow FROM bot_answers a LEFT JOIN flows f ON f.id=a.flow_id WHERE a.message_id=?').bind(id).first(),
@@ -40,7 +40,7 @@ export async function botInfo(url: URL, env: Env, user: User): Promise<Response>
 // POST /api/bot/block {system_number, peer_number, blocked}: turns the bot off (ending any conversation) or back on.
 export async function botBlock(request: Request, env: Env, user: User): Promise<Response> {
  const body = await readBody(request); const system = phone(body.system_number); const peer = phone(body.peer_number);
- if (typeof body.blocked !== 'boolean') throw new HttpError(400,'blocked must be true or false'); if (!await canUse(env,user,system)) throw new HttpError(403,'This number is not assigned to you');
+ if (typeof body.blocked !== 'boolean') throw new HttpError(400,'blocked must be true or false'); if (!await seesCustomer(env,user,system,peer)) throw new HttpError(403,'This customer is not in your messages');
  await env.DB.batch(body.blocked
   ? [env.DB.prepare('INSERT INTO bot_blocks (system_number,peer_number,created_at,created_by) VALUES (?,?,?,?) ON CONFLICT DO NOTHING').bind(system,peer,Date.now(),user.email),env.DB.prepare('DELETE FROM conversations WHERE system_number=? AND peer_number=?').bind(system,peer),audit(env,user.email,'bot.block',peer,{system_number:system})]
   : [env.DB.prepare('DELETE FROM bot_blocks WHERE system_number=? AND peer_number=?').bind(system,peer),audit(env,user.email,'bot.unblock',peer,{system_number:system})]);

@@ -1,6 +1,7 @@
 import {Env,HttpError,json,phone,encodeCursor,decodeCursor} from '../../../shared/validation';
 import {ContactField,loadSettings} from '../../../shared/settings';
 import {User,audit} from './users';
+import {scope} from './scope';
 type Row = {id:number;sort_key:number|string;contact:string|null;[key:string]:unknown};
 // Every message query joins the customer's contact data and the send that produced it (for test sends).
 const FROM = 'messages m LEFT JOIN contacts c ON c.number=m.peer_number LEFT JOIN sends s ON s.id=m.send_id';
@@ -22,7 +23,8 @@ const phoneNeedle = (v: string) => { const d=v.replace(/[^0-9+]/g,''); return d.
 // per-number index for this condition, which would read every message of those numbers and sort them.
 async function filters(p: URLSearchParams, env: Env, user: User, fields: ContactField[]): Promise<{conditions:string[];bindings:(string|number)[]}> {
  const admin=user.role==='admin';
- const conditions=[admin?'+m.system_number IN (SELECT sn.number FROM system_numbers sn WHERE sn.active=1)':'+m.system_number IN (SELECT u.system_number FROM user_numbers u JOIN system_numbers sn ON sn.number=u.system_number WHERE u.email=? AND sn.active=1)']; const bindings: (string|number)[]=admin?[]:[user.email];
+ // Which messages the user may see at all, including any view restrictions on their numbers (scope.ts).
+ const visible=await scope(env,user); const conditions=[visible.sql]; const bindings: (string|number)[]=[...visible.bindings];
  const numbers=(p.get('system_number')||'').split(',').filter(Boolean); if (numbers.length) { if (numbers.length>50) throw new HttpError(400,'Too many numbers'); const wanted=[...new Set(numbers.map(n=>phone(n)))];
   const allowed=(admin?await env.DB.prepare('SELECT number FROM system_numbers WHERE active=1 AND number IN (SELECT value FROM json_each(?))').bind(JSON.stringify(wanted)).all():await env.DB.prepare('SELECT u.system_number FROM user_numbers u JOIN system_numbers sn ON sn.number=u.system_number WHERE u.email=? AND sn.active=1 AND u.system_number IN (SELECT value FROM json_each(?))').bind(user.email,JSON.stringify(wanted)).all()).results.length;
   if (allowed!==wanted.length) throw new HttpError(403,'System number is not assigned'); conditions.push('m.system_number IN (SELECT value FROM json_each(?))');bindings.push(JSON.stringify(wanted)); }

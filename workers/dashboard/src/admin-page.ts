@@ -10,6 +10,12 @@ const css = String.raw`
 .perm{display:grid;gap:4px;max-height:240px;overflow:auto;padding:6px 10px;border:1px solid var(--line);border-radius:9px}
 .perm-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 0}
 .perm-row select{width:auto;min-width:150px;min-height:32px}
+.perm-row{flex-wrap:wrap}.perm-end{display:flex;align-items:center;gap:6px;margin-inline-start:auto}.perm-end .ghost{height:30px;padding:0 8px}
+.perm-note{flex-basis:100%;font-size:12px;color:var(--accent-ink)}
+#rs-date,#rs-time{width:auto}
+.rule-row{display:grid;grid-template-columns:150px 130px 110px minmax(0,1fr) 32px;gap:6px;align-items:center}
+.rule-row select,.rule-row input{min-height:32px}
+@media (max-width:760px){.rule-row{grid-template-columns:1fr 1fr 32px}.rule-row .rule-value{grid-column:1/3}}
 .settings{display:grid;gap:16px;max-width:760px;padding:18px 20px}
 .optout-add{display:flex;flex:1 1 320px;gap:8px;align-items:center}
 .optout-add input{flex:1;min-width:0}
@@ -64,6 +70,13 @@ const userDialog = String.raw`
  <div class="grid2" id="ct-fields"></div>
  <div class="banner" id="ct-error" role="alert" hidden></div>
  <div class="dialog-foot"><button type="button" class="ghost danger" id="ct-delete">מחיקת איש הקשר</button><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn">שמירה</button></div>
+</form></dialog>
+<dialog id="rs-dlg" aria-labelledby="rs-title"><form class="dialog-body" id="rs-form" novalidate>
+ <div class="dialog-head"><h2 id="rs-title"></h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <div class="fld"><span class="label">להציג הודעות רק מ-</span><div class="row"><input type="date" id="rs-date" class="field" aria-label="מתאריך"><input type="time" id="rs-time" class="field" aria-label="משעה"><button type="button" class="ghost" id="rs-date-clear">ללא הגבלת זמן</button></div><p class="hint">ריק: כל ההודעות, כולל ההיסטוריה.</p></div>
+ <div class="fld"><span class="label">ורק הודעות שעונות על כל התנאים</span><div class="field-rows" id="rs-rules"></div><div class="row"><button type="button" class="ghost" id="rs-add">`+svg('plus')+String.raw`הוספת תנאי</button><span class="hint">תנאי על איש קשר או על תשובת בוט חל על כל ההודעות של אותו לקוח.</span></div></div>
+ <div class="banner" id="rs-error" role="alert" hidden></div>
+ <div class="dialog-foot"><button type="button" class="ghost danger" id="rs-clear">הסרת כל ההגבלות</button><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn">אישור</button></div>
 </form></dialog>
 <dialog id="fm-dlg" aria-labelledby="fm-title"><form class="dialog-body" id="fm-form" novalidate>
  <div class="dialog-head"><h2 id="fm-title">שדות אנשי קשר</h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
@@ -218,10 +231,39 @@ function openUser(email){const u=email?USERS.find(function(x){return x.email===e
  $('ud-email').value=u?u.email:'';$('ud-email').readOnly=!!u;$('ud-name').value=u?u.name:'';$('ud-role').value=u?u.role:'user';$('ud-active').checked=u?!!u.active:true;$('ud-bulk').checked=u?!!u.can_bulk_send:false;$('ud-contacts').checked=u?!!u.can_edit_contacts:true;
  $('ud-test').value=u&&u.test_number?local(u.test_number):'';$('ud-limit').value=u&&u.daily_limit!==null?String(u.daily_limit):'';$('ud-limit').placeholder='ברירת מחדל: '+nf.format(SETTINGS.default_daily_limit);
  const perms=$('ud-perms');perms.replaceChildren();
- for(const n of NUMBERS){const current=u&&u.numbers.find(function(x){return x.number===n.number;});const row=el('label','perm-row');const name=el('span');name.append(n.label+' · ',el('span','phone',local(n.number)));if(!n.active)name.append(el('span','muted',' (מושבת)'));
-  const sel=el('select');sel.dataset.number=n.number;for(const o of [['','ללא גישה'],['view','צפייה'],['send','צפייה ושליחה']]){const opt=el('option','',o[1]);opt.value=o[0];sel.append(opt);}sel.value=current?(current.can_send?'send':'view'):'';row.append(name,sel);perms.append(row);}
+ UD=new Map();for(const x of (u?u.numbers:[]))if(x.view_from!==null&&x.view_from!==undefined||x.view_rules&&x.view_rules.length)UD.set(x.number,{view_from:x.view_from??null,view_rules:x.view_rules||[]});
+ for(const n of NUMBERS){const current=u&&u.numbers.find(function(x){return x.number===n.number;});const row=el('div','perm-row');const name=el('span');name.append(n.label+' · ',el('span','phone',local(n.number)));if(!n.active)name.append(el('span','muted',' (מושבת)'));
+  const sel=el('select');sel.dataset.number=n.number;sel.setAttribute('aria-label','גישה ל-'+n.label);for(const o of [['','ללא גישה'],['view','צפייה'],['send','צפייה ושליחה']]){const opt=el('option','',o[1]);opt.value=o[0];sel.append(opt);}sel.value=current?(current.can_send?'send':'view'):'';
+  const rb=el('button','ghost','הגבלות');rb.type='button';rb.addEventListener('click',function(){openRestrict(n);});const note=el('span','perm-note');note.dataset.note=n.number;
+  const end=el('span','perm-end');end.append(rb,sel);row.append(name,end,note);perms.append(row);const sync=function(){rb.disabled=!sel.value;note.textContent=sel.value?restrictSummary(UD.get(n.number)):'';};sel.addEventListener('change',sync);sync();}
  if(!NUMBERS.length)perms.append(el('p','hint','עדיין לא הוגדרו מספרים.'));
  $('ud-delete').hidden=$('ud-disconnect').hidden=!u||u.email===ME.email;$('ud-error').hidden=true;roleChanged();$('user-dlg').showModal();(u?$('ud-name'):$('ud-email')).focus();}
+// View restrictions per number: messages from a date onward, and only those matching every condition.
+let UD=new Map(),RS=null;
+const RULE_TYPES=[['field','שדה איש קשר'],['answer','תשובת בוט'],['text','תוכן ההודעה'],['direction','כיוון']];
+function ruleText(r){const v='"'+r.value+'"';if(r.type==='direction')return r.value==='in'?'רק נכנסות':'רק יוצאות';if(r.type==='text')return 'הודעה מכילה '+v;
+ const op=r.op==='eq'?' = ':' מכיל ';if(r.type==='answer')return 'תשובת בוט'+op+v;const f=(SETTINGS.contact_fields||[]).find(function(x){return x.id===r.field;});return (f?f.label:r.field)+op+v;}
+function restrictSummary(r){if(!r)return '';const parts=[];if(r.view_from!==null&&r.view_from!==undefined)parts.push('מ-'+shortFmt.format(r.view_from));for(const x of r.view_rules||[])parts.push(ruleText(x));return parts.length?'מוגבל: '+parts.join(' · '):'';}
+function openRestrict(n){const cur=UD.get(n.number);RS={number:n.number,rules:JSON.parse(JSON.stringify(cur?cur.view_rules:[]))};$('rs-title').textContent='הגבלות צפייה · '+n.label;
+ if(cur&&cur.view_from!==null){const z=zoned(cur.view_from);$('rs-date').value=ymd(cur.view_from);$('rs-time').value=pad(z.hour)+':'+pad(z.minute);}else{$('rs-date').value='';$('rs-time').value='';}
+ $('rs-error').hidden=true;renderRules();$('rs-dlg').showModal();}
+function renderRules(){const box=$('rs-rules');box.replaceChildren();
+ RS.rules.forEach(function(r,i){const row=el('div','rule-row');const type=el('select');type.setAttribute('aria-label','סוג התנאי');for(const t of RULE_TYPES){const o=el('option','',t[1]);o.value=t[0];type.append(o);}type.value=r.type;
+  type.addEventListener('change',function(){RS.rules[i]=type.value==='direction'?{type:'direction',value:'in'}:type.value==='text'?{type:'text',value:r.value&&r.type!=='direction'?r.value:''}:type.value==='field'?{type:'field',field:(SETTINGS.contact_fields[0]||{}).id||'',op:'eq',value:''}:{type:'answer',op:'eq',value:''};renderRules();});
+  const field=el('select');field.setAttribute('aria-label','שדה');for(const f of SETTINGS.contact_fields){const o=el('option','',f.label);o.value=f.id;field.append(o);}if(r.type==='field')field.value=r.field;field.addEventListener('change',function(){r.field=field.value;});field.style.visibility=r.type==='field'?'visible':'hidden';
+  const op=el('select');op.setAttribute('aria-label','השוואה');for(const o of [['eq','שווה ל-'],['contains','מכיל']]){const x=el('option','',o[1]);x.value=o[0];op.append(x);}if(r.op)op.value=r.op;op.addEventListener('change',function(){r.op=op.value;});op.style.visibility=r.type==='field'||r.type==='answer'?'visible':'hidden';
+  let value;if(r.type==='direction'){value=el('select','rule-value');for(const o of [['in','נכנסות בלבד'],['out','יוצאות בלבד']]){const x=el('option','',o[1]);x.value=o[0];value.append(x);}value.value=r.value;value.addEventListener('change',function(){r.value=value.value;});}
+  else{value=el('input','rule-value');value.maxLength=200;value.value=r.value||'';value.placeholder=r.type==='answer'?'לדוגמה: מעוניין':r.type==='text'?'מילה או ביטוי':'ערך';value.setAttribute('aria-label','ערך');value.addEventListener('input',function(){r.value=value.value;});}
+  const x=el('button','icon-btn');x.type='button';x.setAttribute('aria-label','הסרת התנאי');x.append(icon('close'));x.addEventListener('click',function(){RS.rules.splice(i,1);renderRules();});
+  row.append(type,field,op,value,x);box.append(row);});
+ if(!RS.rules.length)box.append(el('p','hint','אין תנאים: כל ההודעות של המספר (מהתאריך שנבחר, אם נבחר).'));}
+$('rs-add').addEventListener('click',function(){if(RS.rules.length>=10){toast('אפשר עד 10 תנאים');return;}RS.rules.push(SETTINGS.contact_fields.length?{type:'field',field:SETTINGS.contact_fields[0].id,op:'eq',value:''}:{type:'answer',op:'eq',value:''});renderRules();});
+$('rs-date-clear').addEventListener('click',function(){$('rs-date').value='';$('rs-time').value='';});
+$('rs-clear').addEventListener('click',function(){UD.delete(RS.number);updateNote(RS.number);$('rs-dlg').close();});
+function updateNote(number){const note=document.querySelector('[data-note="'+number+'"]');if(note)note.textContent=restrictSummary(UD.get(number));}
+$('rs-form').addEventListener('submit',function(e){e.preventDefault();for(const r of RS.rules)if(r.type!=='direction'&&!String(r.value||'').trim()){dlgError('rs-error',new Error('לכל תנאי צריך ערך'));return;}
+ const d=$('rs-date').value;const from=d?israelTime(d,$('rs-time').value||'00:00'):null;const rules=RS.rules.map(function(r){return r.type==='direction'?{type:'direction',value:r.value}:r.type==='text'?{type:'text',value:r.value.trim()}:r.type==='answer'?{type:'answer',op:r.op||'eq',value:r.value.trim()}:{type:'field',field:r.field,op:r.op||'eq',value:r.value.trim()};});
+ if(from===null&&!rules.length)UD.delete(RS.number);else UD.set(RS.number,{view_from:from,view_rules:rules});updateNote(RS.number);$('rs-dlg').close();toast('ההגבלות יישמרו בלחיצה על "שמירה" בחלון המשתמש');});
 function roleChanged(){const admin=$('ud-role').value==='admin';$('ud-admin-note').hidden=!admin;$('ud-perms').hidden=admin;$('ud-bulk').disabled=admin;$('ud-contacts').disabled=admin;$('ud-limit').disabled=admin;}
 $('ud-role').addEventListener('change',roleChanged);
 $('u-q').addEventListener('input',renderUsers);
@@ -231,7 +273,7 @@ $('u-rows').addEventListener('keydown',function(e){if((e.key==='Enter'||e.key===
 $('ud-form').addEventListener('submit',async function(e){e.preventDefault();const editing=$('ud-email').readOnly;const limit=$('ud-limit').value.trim();
  if(limit!==''&&!/^[0-9]+$/.test(limit)){dlgError('ud-error',new Error('מגבלת הנמענים צריכה להיות מספר שלם'));return;}
  const test=$('ud-test').value.trim();if(test&&!normalize(test)){dlgError('ud-error',new Error('מספר הבדיקה אינו תקין'));return;}
- const numbers=[];for(const s of $('ud-perms').querySelectorAll('select'))if(s.value)numbers.push({number:s.dataset.number,can_send:s.value==='send'});
+ const numbers=[];for(const s of $('ud-perms').querySelectorAll('select'))if(s.value){const r=UD.get(s.dataset.number);numbers.push({number:s.dataset.number,can_send:s.value==='send',view_from:r?r.view_from:null,view_rules:r&&r.view_rules.length?r.view_rules:null});}
  $('ud-save').disabled=true;
  try{const d=await post('/api/admin/users/save',{create:!editing,email:$('ud-email').value.trim(),name:$('ud-name').value,role:$('ud-role').value,active:$('ud-active').checked,can_bulk_send:$('ud-bulk').checked,can_edit_contacts:$('ud-contacts').checked,daily_limit:limit===''?null:Number(limit),test_number:test?normalize(test):null,numbers:numbers});
   $('user-dlg').close();accessResult(editing?'המשתמש עודכן':'המשתמש נוסף',d.access);await loadUsers();}
