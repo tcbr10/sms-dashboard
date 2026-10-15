@@ -45,6 +45,7 @@ The README documents setup, routes, field mapping and operations in detail.
 | `workers/dashboard/src/access.ts` | Cloudflare Access policy sync (active users' emails) |
 | `shared/forwarding.ts` | Webhook deliveries: queue, signed request, retries (ingest cron) |
 | `shared/micropay-send.ts` | One scheduleSms call, used by dashboard sends and API bot replies |
+| `shared/template.ts` | Message variables ({field}, {field|default}, {טלפון}) for sends and bot replies |
 | `shared/bot.ts` | Bot engine: conversation state, option matching, replies, answers |
 | `workers/dashboard/src/forwards.ts` | `/api/admin/forwards*`: rules, delivery log, test, resend |
 | `workers/dashboard/src/flows.ts` | `/api/admin/flows*` (admins), `/api/bot/info` and `/api/bot/block` (users) |
@@ -86,6 +87,7 @@ The README documents setup, routes, field mapping and operations in detail.
 - **Forwarding runs after the response** (`ctx.waitUntil`) and its retries run on the ingest cron. Each delivery claims itself by pushing `next_at` a minute ahead, so the cron and an immediate try never send the same delivery at once. A cron run handles at most 10 deliveries because of the free plan's 50 queries per invocation.
 - **The Micropay route repairs automation JSON.** Automations paste the message into their JSON template unescaped; raw control characters are escaped and, failing that, known fields are read by name (`lenientJson` in `micropay.ts`). Keep other routes strict.
 - **Every message query must start from `scope()`** (scope.ts). It returns the user's visibility SQL, including view restrictions, and needs contacts joined as `c`. Unrestricted users keep the single `+m.system_number IN (…)` condition, so their queries are unchanged.
+- **Personalized sends are batched by the browser (40 recipients)** because each distinct text is one Micropay call and the free plan allows 50 outgoing calls per request. Plain sends stay one call.
 - **Statements over many rows use `json_each`** (imports, flow starts, bot blocks) rather than one statement per row, for the same 50-query limit.
 - **Lists are expanded in the browser** into recipients; the send endpoint stays the single place that validates and limits recipients.
 - **Cursors are UTF-8 base64url**, because contact sort values can be Hebrew.

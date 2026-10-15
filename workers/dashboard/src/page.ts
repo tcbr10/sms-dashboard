@@ -49,6 +49,8 @@ tr.open .body{display:block;overflow:visible}
 #filters-btn{display:none}
 #c-file-btn,#le-file-btn{cursor:pointer}
 #c-invalid-more{height:24px;margin-inline-start:6px;padding:0 6px}
+#c-vars{height:28px;padding:0 8px;font-size:12.5px}
+#c-vars-hint{white-space:pre-wrap;overflow-wrap:anywhere}
 #c-to:placeholder-shown,#le-add:placeholder-shown{direction:rtl}
 .dialog-body .banner{border:0;border-radius:9px}
 .check-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 12px}
@@ -120,7 +122,8 @@ const body = header('messages',true) + String.raw`
   <p class="hint bad" id="c-invalid" hidden><span id="c-invalid-text"></span><button type="button" class="ghost" id="c-invalid-more">פירוט</button></p>
  </div>
  <div class="fld" id="c-lists-row" hidden><span class="label">רשימות תפוצה</span><div class="check-grid" id="c-lists"></div></div>
- <div class="fld"><label class="label" for="c-body">הודעה</label><textarea id="c-body" rows="5" maxlength="1000"></textarea>
+ <div class="fld"><div class="row"><label class="label" for="c-body">הודעה</label><button type="button" class="ghost end" id="c-vars" aria-haspopup="dialog">{ } הוספת משתנה</button></div><textarea id="c-body" rows="5" maxlength="1000"></textarea>
+  <p class="hint" id="c-vars-hint" hidden></p>
   <div class="row"><span class="hint" id="c-count"></span><span class="hint end" id="c-usage"></span></div><p class="hint" id="c-optout" hidden></p></div>
  <div class="fld"><span class="label">הודעת בדיקה</span><div class="row"><input id="c-test" class="field phone" dir="ltr" maxlength="20" placeholder="מספר לבדיקה" aria-label="מספר לבדיקה"><button type="button" class="ghost" id="c-test-send">`+svg('flask')+String.raw`שליחת בדיקה</button><label class="check hint"><input type="checkbox" id="c-test-save">שמירה כמספר הבדיקה שלי</label></div></div>
  <div class="banner" id="c-error" role="alert" hidden></div>
@@ -491,12 +494,24 @@ $('lists-btn').addEventListener('click',openLists);
 
 // Compose. The send ID is created when the panel opens and kept across retries of a failed request,
 // so the server can tell a retry from a new send; it is only replaced after a send the provider rejected.
-const C={id:null,rows:null,file:'',imported:[],lists:new Set(),confirm:false,sending:false};
+const C={id:null,rows:null,file:'',imported:[],lists:new Set(),confirm:false,sending:false,batches:null,preview:''};
+// Message variables, as in shared/template.ts: {field name}, {field name|default}, {טלפון}.
+const VAR_RE=/\{([^{}|\n]{1,30})(?:\|([^{}\n]{0,60}))?\}/g;const PERSONAL_BATCH=40;
+function varNames(){return ME.contact_fields.map(function(f){return f.label;}).concat(['טלפון']);}
+function usedVars(t){return Array.from(t.matchAll(VAR_RE)).map(function(m){return m[1].trim();});}
+function insertVar(name){const ta=$('c-body');if(ta.readOnly)return;const a=ta.selectionStart==null?ta.value.length:ta.selectionStart,b=ta.selectionEnd==null?a:ta.selectionEnd;const v='{'+name+'}';
+ ta.value=ta.value.slice(0,a)+v+ta.value.slice(b);ta.selectionStart=ta.selectionEnd=a+v.length;closeMenu();ta.focus();edited();}
+$('c-vars').addEventListener('click',function(){popover($('c-vars'),function(m){m.append(el('div','menu-title','משתנים'));for(const n of varNames()){const b=el('button','opt','{'+n+'}');b.type='button';b.addEventListener('click',function(){insertVar(n);});m.append(b);}
+ m.append(el('hr'),el('p','hint','כל משתנה מוחלף בפרטי הנמען. משתנה ריק יוסר, או שאפשר לקבוע ערך חלופי: {שם|לקוח יקר}.'));});});
+// Preview for the first recipient, rendered by the server with their contact data.
+let previewTimer=0;
+function schedulePreview(n0){const body=$('c-body').value;const key=JSON.stringify([$('c-from').value,n0,body]);if(key===C.preview)return;C.preview=key;clearTimeout(previewTimer);
+ previewTimer=setTimeout(function(){post('/api/send/preview',{system_number:$('c-from').value,recipient:n0,body:body,bulk:recipients().list.length>1}).then(function(d){if(C.preview!==key)return;$('c-vars-hint').textContent='לדוגמה ל-'+local(n0)+':\n'+d.body;}).catch(function(){});},500);}
 function senders(){return ME?ME.numbers.filter(function(n){return n.can_send;}):[];}
 function canSend(number){return senders().some(function(n){return n.number===number;});}
 function openCompose(from,to){const list=senders();if(!list.length)return;const sel=$('c-from');sel.replaceChildren();
  for(const n of list){const o=el('option','',n.label+' · '+local(n.number));o.value=n.number;sel.append(o);}if(from&&canSend(from))sel.value=from;
- Object.assign(C,{id:crypto.randomUUID(),rows:null,file:'',imported:[],lists:new Set(),confirm:false,sending:false});
+ Object.assign(C,{id:crypto.randomUUID(),rows:null,file:'',imported:[],lists:new Set(),confirm:false,sending:false,batches:null,preview:''});
  $('c-to').value=to?local(to):'';$('c-body').value='';$('c-import').hidden=true;$('c-error').hidden=true;$('c-file-btn').hidden=$('c-save-list').hidden=!ME.can_bulk_send;
  $('c-test').value=ME.test_number?local(ME.test_number):'';$('c-test-save').checked=false;renderComposeLists();if(ME.can_bulk_send&&LISTS===null)loadLists();
  $('c-body').readOnly=false;$('c-stop-bot').checked=false;renderComposeFlows();updateCompose();$('compose').showModal();(to?$('c-body'):$('c-to')).focus();}
@@ -522,14 +537,16 @@ function finalBody(n){let b=$('c-body').value;const t=ME.settings.optout_text;if
 function updateCompose(){const r=recipients();const n=r.list.length;const body=finalBody(n);const seg=segments(body);
  $('c-summary').textContent=n?nf.format(n)+(n===1?' נמען':' נמענים')+(r.duplicates?' · '+(r.duplicates===1?'כפילות אחת הוסרה':nf.format(r.duplicates)+' כפילויות הוסרו'):''):'עדיין לא הוזנו נמענים';
  $('c-invalid').hidden=!r.invalid.length;$('c-invalid-text').textContent=r.invalid.length?(r.invalid.length===1?'מספר לא תקין שלא יישלח: ':nf.format(r.invalid.length)+' מספרים לא תקינים שלא יישלחו: ')+r.invalid.slice(0,4).map(function(x){return x.value;}).join(', ')+(r.invalid.length>4?'…':''):'';
- $('c-count').textContent=body.length?nf.format(body.length)+' / 1,000 תווים · '+seg+' SMS לנמען':'';
+ const vars=usedVars($('c-body').value);const personal=vars.length>0;const unknown=vars.filter(function(v){return varNames().indexOf(v)<0;});
+ $('c-count').textContent=body.length?nf.format(body.length)+' / 1,000 תווים · '+seg+' SMS לנמען'+(personal?' (לפני מילוי המשתנים)':''):'';$('c-vars').hidden=$('c-body').readOnly;
+ $('c-vars-hint').hidden=!personal;if(personal&&!unknown.length&&n)schedulePreview(r.list[0]);else if(personal)$('c-vars-hint').textContent=unknown.length?'':'התצוגה המקדימה תופיע אחרי שמוסיפים נמען.';
  $('c-optout').hidden=!(n>1&&ME.settings.optout_text);$('c-optout').textContent='בשליחה לכמה נמענים יתווסף בסוף ההודעה: '+ME.settings.optout_text;
  $('c-usage').textContent=ME.daily_limit===null?'':'נוצלו '+nf.format(ME.sent_24h)+' מתוך '+nf.format(ME.daily_limit)+' ב-24 השעות האחרונות';
- const problem=!n?'':n>1&&!ME.can_bulk_send?'אין לך הרשאה לשלוח ליותר מנמען אחד':n>ME.settings.max_recipients?'אפשר לשלוח עד '+nf.format(ME.settings.max_recipients)+' נמענים בכל פעם':ME.daily_limit!==null&&ME.sent_24h+n>ME.daily_limit?'השליחה תחרוג מהמגבלה היומית שלך':body.length>1000?'ההודעה ארוכה מדי':'';
+ const problem=!n?'':n>1&&!ME.can_bulk_send?'אין לך הרשאה לשלוח ליותר מנמען אחד':n>ME.settings.max_recipients?'אפשר לשלוח עד '+nf.format(ME.settings.max_recipients)+' נמענים בכל פעם':ME.daily_limit!==null&&ME.sent_24h+n>ME.daily_limit?'השליחה תחרוג מהמגבלה היומית שלך':body.length>1000?'ההודעה ארוכה מדי':unknown.length?'משתנה לא מוכר: {'+unknown.join('}, {')+'}':'';
  const ready=n>0&&$('c-body').value.trim().length>0&&!problem;
  $('c-total').textContent=problem||(ready?'סה״כ כ-'+nf.format(seg*n)+' SMS':'');$('c-total').className='hint'+(problem?' bad':'');
  $('c-send').disabled=!ready||C.sending;if(!C.sending)$('c-send-text').textContent=C.confirm?'אישור שליחה ל-'+nf.format(n)+(n===1?' נמען':' נמענים'):'המשך';}
-function edited(){C.confirm=false;updateCompose();}
+function edited(){C.confirm=false;C.batches=null;updateCompose();}
 function composeError(text){$('c-error').hidden=false;$('c-error').textContent=text;}
 function pickColumn(){const pc=phoneColumn(C.rows);const sel=$('c-column');sel.replaceChildren();
  for(let c=0;c<pc.width;c++){const o=el('option','',(pc.header&&C.rows[0][c]?C.rows[0][c]:'עמודה '+(c+1))+(pc.scores[c]?' ('+pc.scores[c]+')':''));o.value=String(c);sel.append(o);}
@@ -559,11 +576,21 @@ $('c-test-send').addEventListener('click',async function(){const n=normalize($('
 $('c-form').addEventListener('submit',async function(e){e.preventDefault();if(C.sending)return;const r=recipients();if(!r.list.length||$('c-send').disabled)return;
  if(!C.confirm){C.confirm=true;updateCompose();return;}
  C.sending=true;$('c-send').disabled=true;$('c-send-text').textContent='שולח…';$('c-error').hidden=true;
- try{const flow=$('c-flow-row').hidden?'':$('c-flow').value;const d=await post('/api/send',{id:C.id,system_number:$('c-from').value,recipients:r.list,body:$('c-body').value,flow_id:flow?Number(flow):null,stop_bot:!flow&&!$('c-flow-row').hidden&&$('c-stop-bot').checked});
-  if(d.status==='rejected'){C.id=crypto.randomUUID();composeError('הספק דחה את השליחה'+(d.error?': '+d.error:''));}
-  else{$('compose').close();toast(d.duplicate?'השליחה הזו כבר בוצעה':d.status==='accepted'?'נשלח ל-'+nf.format(d.sent)+(d.sent===1?' נמען':' נמענים')+(d.skipped&&d.skipped.opted_out?' · '+nf.format(d.skipped.opted_out)+' ברשימת ההסרה דולגו':''):'ההודעה הועברה לספק אך התוצאה לא ידועה. בדקו בטבלה לפני שליחה חוזרת.');}
+ // Personalized messages go in batches of 40, each with its own send ID kept across retries, so retrying after a
+ // failure sends only the batches that did not go out. Other messages go in one request, as before.
+ const body=$('c-body').value;const flow=$('c-flow-row').hidden?'':$('c-flow').value;const stop=!flow&&!$('c-flow-row').hidden&&$('c-stop-bot').checked;
+ const personal=usedVars(flow?((ME.flows||[]).find(function(f){return String(f.id)===flow;})||{first:''}).first:body).length>0;
+ if(!C.batches){const size=personal?PERSONAL_BATCH:r.list.length;C.batches=[];for(let i=0;i<r.list.length;i+=size)C.batches.push({id:C.batches.length?crypto.randomUUID():C.id,list:r.list.slice(i,i+size),done:false});}
+ const total={sent:0,accepted:0,rejected:0,unknown:0,opted:0,duplicate:false};
+ try{for(let i=0;i<C.batches.length;i++){const b=C.batches[i];if(b.done)continue;if(C.batches.length>1)$('c-send-text').textContent='שולח '+nf.format(i+1)+' מתוך '+nf.format(C.batches.length)+'…';
+   const d=await post('/api/send',{id:b.id,system_number:$('c-from').value,recipients:b.list,body:body,flow_id:flow?Number(flow):null,stop_bot:stop,bulk:r.list.length>1});
+   if(d.status==='rejected'&&!d.duplicate){b.id=crypto.randomUUID();if(i===0)C.id=b.id;throw new Error('הספק דחה את השליחה'+(d.error?': '+d.error:'')+(total.sent?' ('+nf.format(total.sent)+' נמענים כבר קיבלו את ההודעה; שליחה חוזרת תמשיך מהמקום שנעצר)':''));}
+   b.done=true;total.sent+=d.sent;total.duplicate=total.duplicate||!!d.duplicate;if(d.skipped)total.opted+=d.skipped.opted_out||0;
+   if(d.counts){total.accepted+=d.counts.accepted;total.rejected+=d.counts.rejected;total.unknown+=d.counts.unknown;}else total[d.status==='accepted'?'accepted':'unknown']+=d.sent;}
+  $('compose').close();
+  toast(total.duplicate&&C.batches.length===1?'השליחה הזו כבר בוצעה':(total.accepted?'נשלח ל-'+nf.format(total.accepted)+(total.accepted===1?' נמען':' נמענים'):'')+(total.unknown?(total.accepted?' · ':'')+nf.format(total.unknown)+' בתוצאה לא ידועה, בדקו בטבלה לפני שליחה חוזרת':'')+(total.rejected?' · '+nf.format(total.rejected)+' נדחו':'')+(total.opted?' · '+nf.format(total.opted)+' ברשימת ההסרה דולגו':''));
   loadMe().catch(function(){});tick();}
- catch(err){composeError(message(err));}
+ catch(err){composeError(message(err));loadMe().catch(function(){});tick();}
  finally{C.sending=false;C.confirm=false;updateCompose();}});
 $('new').addEventListener('click',function(){openCompose();});
 

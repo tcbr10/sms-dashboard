@@ -1,4 +1,6 @@
 import {Env} from './validation';
+import {loadSettings} from './settings';
+import {hasVariables,render} from './template';
 // Auto-reply flows. A conversation (system number + customer) remembers its current step, so the same reply ("1") is
 // read against the options of whichever question was asked last. Replies go out as the answer to Micropay's
 // incoming-SMS webhook, so they need no API call and come from the same number.
@@ -71,8 +73,10 @@ export async function handleIncoming(env: Env, m: {id:number;inserted:boolean;sy
   const start = flows.find(f => f.trigger === 'keyword' && f.keyword && [text, first].includes(normalizeReply(f.keyword))) ?? flows.find(f => f.trigger === 'any');
   if (start?.steps.length) { reply = start.steps[0].text; writes.push(enter(env, start, start.steps[0], m.system, m.peer, now)); }
  }
- // The reply is logged as an outgoing message from the bot.
- if (reply) writes.push(env.DB.prepare("INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,updated_at,sent_by) VALUES (?,'out',?,?,?,?,?,'workflow',?,?,?) ON CONFLICT(event_key) DO NOTHING").bind(key, m.system, m.peer, reply, now, now, status, now, BOT_SENDER));
+ // State and answers are written first, so variables in the reply ({שם}…) see an answer this step just saved.
  if (writes.length) await env.DB.batch(writes);
+ if (reply && hasVariables(reply)) { const [settings,contact] = await Promise.all([loadSettings(env.DB),env.DB.prepare('SELECT data FROM contacts WHERE number=?').bind(m.peer).first<{data:string}>()]); reply = render(reply,settings.contact_fields,contact ? JSON.parse(contact.data) : null,m.peer) || null; }
+ // The reply is logged as an outgoing message from the bot.
+ if (reply) await env.DB.prepare("INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,updated_at,sent_by) VALUES (?,'out',?,?,?,?,?,'workflow',?,?,?) ON CONFLICT(event_key) DO NOTHING").bind(key, m.system, m.peer, reply, now, now, status, now, BOT_SENDER).run();
  return reply;
 }

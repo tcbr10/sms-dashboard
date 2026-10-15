@@ -288,6 +288,26 @@ describe('Cloudflare Access sync',()=>{
  it('does nothing when not configured',async()=>{expect(await body(api('admin@example.com','/api/admin/users/save',{...save('new@example.com',true),create:true}))).toEqual({ok:true,access:null});
   expect((await api('admin@example.com','/api/admin/users/access-sync',{})).status).toBe(503);});
 });
+describe('message variables',()=>{
+ const third='+972509876544',fourth='+972509876545';
+ const calls:{msg:string;list:string}[]=[];const fetcher=async(_u:string,init:RequestInit)=>{const b=JSON.parse(String(init.body));calls.push({msg:b.msg,list:b.list});return new Response('OK '+calls.length);};
+ const sendAs=(b:Record<string,unknown>,path='/api/send')=>handle(new Request(ORIGIN+path,{method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify({id:crypto.randomUUID(),system_number:number,...b})}),{...env,MICROPAY_TOKEN:'t'},'admin@example.com',{fetcher}).catch(failure);
+ beforeEach(async()=>{calls.length=0;await api('admin@example.com','/api/admin/settings',{optout_text:'להסרה השיבו הסר'});await api('admin@example.com','/api/admin/contacts/save',{number:peer,data:{name:'דנה'}});});
+ it('fills each recipient\'s text and sends identical texts together',async()=>{
+  const d=await body(sendAs({recipients:[peer,third,fourth],body:'שלום {שם|לקוח יקר}!'}));expect(d).toMatchObject({status:'accepted',sent:3,counts:{accepted:3,rejected:0,unknown:0}});
+  expect(calls.sort((a,b)=>a.list.length-b.list.length)).toEqual([{msg:'שלום דנה!\r\nלהסרה השיבו הסר',list:'0509876543'},{msg:'שלום לקוח יקר!\r\nלהסרה השיבו הסר',list:'0509876544,0509876545'}]);
+  const rows=(await env.DB.prepare("SELECT peer_number,body,provider_message_id FROM messages WHERE direction='out' ORDER BY peer_number").all()).results;
+  expect(rows.map(r=>(r as {body:string}).body)).toEqual(['שלום דנה!\nלהסרה השיבו הסר','שלום לקוח יקר!\nלהסרה השיבו הסר','שלום לקוח יקר!\nלהסרה השיבו הסר']);
+  calls.length=0;await sendAs({recipients:[third],body:'המספר שלך {טלפון}, שם: {שם}.'});expect(calls).toEqual([{msg:'המספר שלך 0509876544, שם: .',list:'0509876544'}]);
+  calls.length=0;await sendAs({recipients:[peer],body:'אישי {שם}',bulk:true});expect(calls[0].msg).toBe('אישי דנה\r\nלהסרה השיבו הסר');});
+ it('refuses unknown variables and personalized batches over 40, and previews',async()=>{expect(await body(sendAs({recipients:[peer],body:'היי {כתובת}'}))).toEqual({error:'Unknown variable: {כתובת}'});
+  expect((await sendAs({recipients:Array.from({length:41},(_,i)=>'05090000'+String(i).padStart(2,'0')),body:'היי {שם}'})).status).toBe(413);expect(calls).toHaveLength(0);
+  expect(await body(sendAs({recipient:'0509876543',body:'שלום {שם}',bulk:true},'/api/send/preview'))).toEqual({body:'שלום דנה\nלהסרה השיבו הסר',unknown:[]});});
+ it('fills variables in bot replies, including an answer saved in the same step',async()=>{
+  await api('admin@example.com','/api/admin/flows/save',{name:'שם',system_number:number,trigger:'any',steps:[{id:'s1',type:'text',text:'היי {שם|חבר}, מה שמך?',field:'name',next:'s2'},{id:'s2',type:'end',text:'תודה {שם}!'}],fallback:'',expire_hours:24,active:true});
+  const say=async(t:string,msgid:string)=>JSON.parse(await (await ingest(callback('json',{origsms:t,msgid,phone:'0521112222'}),env)).text()).reply;
+  expect(await say('שלום','v1')).toBe('היי חבר, מה שמך?');expect(await say('נועה','v2')).toBe('תודה נועה!');});
+});
 describe('view restrictions',()=>{
  const T=Date.UTC(2026,9,10,12,0);const A='+972521000001',B='+972521000002',C='+972521000003';
  beforeEach(async()=>{const ins=(key:string,peer_:string,body_:string,at:number,dir='in',sys=number)=>env.DB.prepare("INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,updated_at) VALUES (?,?,?,?,?,?,?,'receipt',?,?)").bind(key,dir,sys,peer_,body_,at,at,dir==='out'?'accepted':null,at);
