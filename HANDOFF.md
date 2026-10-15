@@ -16,10 +16,10 @@ The README documents setup, routes, field mapping and operations in detail.
 | Area | State |
 | --- | --- |
 | Code | `main` is pushed to GitHub. CI runs typecheck and tests on every push. |
-| Dashboard | Deployed (version `09d6abe5`): message variables, view restrictions, export with one row per number, up to 20 contact fields with a manage-fields dialog, per-number bot reply method, webhook forwarding and bot tabs, number parsing with import reports, Access sync (token set, working), message import, read-usage fix, typed recent-hours filter, table with column choice and header filters (including hours), profile menu with sign-out, contact editing by users, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
-| Ingest | Deployed (version `1deb9b3b`) with variables in bot replies, lenient JSON for Micropay automations (multi-line messages), bot replies through the response or Micropay's API, the two-secret auth, opt-out detection, bot replies, webhook forwarding and an every-minute cron for delivery retries. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
+| Dashboard | Deployed (version `85e39cd4`): scheduled sends, single-call personalized setting (off), message variables, view restrictions, export with one row per number, up to 20 contact fields with a manage-fields dialog, per-number bot reply method, webhook forwarding and bot tabs, number parsing with import reports, Access sync (token set, working), message import, read-usage fix, typed recent-hours filter, table with column choice and header filters (including hours), profile menu with sign-out, contact editing by users, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
+| Ingest | Deployed (version `5e3caf58`) with scheduled sends on the cron, variables in bot replies, lenient JSON for Micropay automations (multi-line messages), bot replies through the response or Micropay's API, the two-secret auth, opt-out detection, bot replies, webhook forwarding and an every-minute cron for delivery retries. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
-| D1 | `0001` to `0009` applied. On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
+| D1 | `0001` to `0010` applied. On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
 | Outgoing logging | Not wired yet. Nothing posts to `/events/outgoing`, so the dashboard shows incoming messages only. |
 
 ## Local-only state on the owner's machine
@@ -184,8 +184,8 @@ Found on 2026-10-13: messages on the bot's number come from a Micropay automatio
 
 ## Rollout of scheduled sends
 
-1. Apply `0010` (`npm run db:migrate`) before deploying.
-2. Deploy ingest (the cron now runs scheduled sends; it needs `MICROPAY_TOKEN`, already set), then the dashboard.
+1. Done: applied `0010`.
+2. Done: deployed ingest, then the dashboard.
 3. Optional: turn on "הודעות אישיות בקריאה אחת" in Settings after a personalized test send to the owner's phone works.
 
 ## Micropay automation webhook
