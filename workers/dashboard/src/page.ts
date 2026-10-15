@@ -50,6 +50,9 @@ tr.open .body{display:block;overflow:visible}
 #c-file-btn,#le-file-btn{cursor:pointer}
 #c-invalid-more{height:24px;margin-inline-start:6px;padding:0 6px}
 #c-vars{height:28px;padding:0 8px;font-size:12.5px}
+#c-later-date,#c-later-time{width:auto}
+.sch-body{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sch-edit{display:flex;gap:4px;align-items:center}.sch-edit input{min-height:30px;padding:0 6px;border:1px solid var(--line);border-radius:7px;background:var(--field)}
 #c-vars-hint{white-space:pre-wrap;overflow-wrap:anywhere}
 #c-to:placeholder-shown,#le-add:placeholder-shown{direction:rtl}
 .dialog-body .banner{border:0;border-radius:9px}
@@ -97,7 +100,7 @@ const body = header('messages',true) + String.raw`
    <button type="button" class="ghost" id="filters-btn">`+svg('filter')+String.raw`סינון ומיון</button>
    <button type="button" class="ghost" id="columns-btn" aria-haspopup="dialog">`+svg('columns')+String.raw`עמודות</button>
    <button type="button" class="ghost" id="export-btn">`+svg('download')+String.raw`ייצוא</button>
-   <button type="button" class="ghost" id="lists-btn" hidden>`+svg('list')+String.raw`רשימות</button>
+   <button type="button" class="ghost" id="sched-btn" hidden>`+svg('clock')+String.raw`מתוזמנות</button><button type="button" class="ghost" id="lists-btn" hidden>`+svg('list')+String.raw`רשימות</button>
    <button type="button" class="btn end" id="new" hidden>`+svg('send')+String.raw`הודעה חדשה</button>
   </form>
   <div class="chips" id="chips"></div>
@@ -126,6 +129,7 @@ const body = header('messages',true) + String.raw`
   <p class="hint" id="c-vars-hint" hidden></p>
   <div class="row"><span class="hint" id="c-count"></span><span class="hint end" id="c-usage"></span></div><p class="hint" id="c-optout" hidden></p></div>
  <div class="fld"><span class="label">הודעת בדיקה</span><div class="row"><input id="c-test" class="field phone" dir="ltr" maxlength="20" placeholder="מספר לבדיקה" aria-label="מספר לבדיקה"><button type="button" class="ghost" id="c-test-send">`+svg('flask')+String.raw`שליחת בדיקה</button><label class="check hint"><input type="checkbox" id="c-test-save">שמירה כמספר הבדיקה שלי</label></div></div>
+ <div class="fld"><label class="check"><input type="checkbox" id="c-later">שליחה מתוזמנת</label><div class="row" id="c-later-row" hidden><input type="date" id="c-later-date" class="field" aria-label="תאריך שליחה"><input type="time" id="c-later-time" class="field" aria-label="שעת שליחה"><span class="hint">לפי שעון ישראל. אפשר לשנות או לבטל עד מועד השליחה.</span></div></div>
  <div class="banner" id="c-error" role="alert" hidden></div>
  <div class="dialog-foot"><span class="hint" id="c-total"></span><button type="button" class="ghost" id="c-cancel">ביטול</button><button type="submit" class="btn" id="c-send">`+svg('send')+String.raw`<span id="c-send-text">המשך</span></button></div>
 </form></dialog>
@@ -160,6 +164,11 @@ const body = header('messages',true) + String.raw`
  <div class="banner" id="ce-error" role="alert" hidden></div>
  <div class="dialog-foot"><span class="end"></span><button type="button" class="ghost" id="ce-cancel">ביטול</button><button type="submit" class="btn" id="ce-save">שמירה</button></div>
 </form></dialog>
+<dialog id="sch-dlg" aria-labelledby="sch-title"><div class="dialog-body">
+ <div class="dialog-head"><h2 id="sch-title">שליחות מתוזמנות</h2><button type="button" class="icon-btn" id="sch-close" aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <div class="table-wrap rp-wrap"><table><thead><tr><th><span>מועד</span></th><th><span>מספר</span></th><th><span>נמענים</span></th><th><span>הודעה</span></th><th><span>מצב</span></th><th><span></span></th></tr></thead><tbody id="sch-rows"></tbody></table></div>
+ <div class="dialog-foot"><span class="hint" id="sch-note"></span><span class="end"></span><button type="button" class="btn" id="sch-done">סגירה</button></div>
+</div></dialog>
 <dialog id="filter-dlg" aria-labelledby="fd-title"><div class="dialog-body">
  <div class="dialog-head"><h2 id="fd-title">סינון ומיון</h2><button type="button" class="icon-btn" id="fd-close" aria-label="סגירה">`+svg('close')+String.raw`</button></div>
  <label class="fld"><span>מיון</span><select id="fd-sort"></select></label>
@@ -512,6 +521,7 @@ function canSend(number){return senders().some(function(n){return n.number===num
 function openCompose(from,to){const list=senders();if(!list.length)return;const sel=$('c-from');sel.replaceChildren();
  for(const n of list){const o=el('option','',n.label+' · '+local(n.number));o.value=n.number;sel.append(o);}if(from&&canSend(from))sel.value=from;
  Object.assign(C,{id:crypto.randomUUID(),rows:null,file:'',imported:[],lists:new Set(),confirm:false,sending:false,batches:null,preview:''});
+ const soon=Date.now()+3600000;$('c-later').checked=false;$('c-later-row').hidden=true;$('c-later-date').value=ymd(soon);const z=zoned(soon);$('c-later-time').value=pad(z.hour)+':00';
  $('c-to').value=to?local(to):'';$('c-body').value='';$('c-import').hidden=true;$('c-error').hidden=true;$('c-file-btn').hidden=$('c-save-list').hidden=!ME.can_bulk_send;
  $('c-test').value=ME.test_number?local(ME.test_number):'';$('c-test-save').checked=false;renderComposeLists();if(ME.can_bulk_send&&LISTS===null)loadLists();
  $('c-body').readOnly=false;$('c-stop-bot').checked=false;renderComposeFlows();updateCompose();$('compose').showModal();(to?$('c-body'):$('c-to')).focus();}
@@ -543,9 +553,13 @@ function updateCompose(){const r=recipients();const n=r.list.length;const body=f
  $('c-optout').hidden=!(n>1&&ME.settings.optout_text);$('c-optout').textContent='בשליחה לכמה נמענים יתווסף בסוף ההודעה: '+ME.settings.optout_text;
  $('c-usage').textContent=ME.daily_limit===null?'':'נוצלו '+nf.format(ME.sent_24h)+' מתוך '+nf.format(ME.daily_limit)+' ב-24 השעות האחרונות';
  const problem=!n?'':n>1&&!ME.can_bulk_send?'אין לך הרשאה לשלוח ליותר מנמען אחד':n>ME.settings.max_recipients?'אפשר לשלוח עד '+nf.format(ME.settings.max_recipients)+' נמענים בכל פעם':ME.daily_limit!==null&&ME.sent_24h+n>ME.daily_limit?'השליחה תחרוג מהמגבלה היומית שלך':body.length>1000?'ההודעה ארוכה מדי':unknown.length?'משתנה לא מוכר: {'+unknown.join('}, {')+'}':'';
- const ready=n>0&&$('c-body').value.trim().length>0&&!problem;
+ const at=laterAt();const timeProblem=$('c-later').checked&&(!at||at<Date.now()+60000)?'יש לבחור מועד עתידי לשליחה':'';
+ const ready=n>0&&$('c-body').value.trim().length>0&&!problem&&!timeProblem;
  $('c-total').textContent=problem||(ready?'סה״כ כ-'+nf.format(seg*n)+' SMS':'');$('c-total').className='hint'+(problem?' bad':'');
- $('c-send').disabled=!ready||C.sending;if(!C.sending)$('c-send-text').textContent=C.confirm?'אישור שליחה ל-'+nf.format(n)+(n===1?' נמען':' נמענים'):'המשך';}
+ if(timeProblem&&!problem){$('c-total').textContent=timeProblem;$('c-total').className='hint bad';}
+ $('c-send').disabled=!ready||C.sending;if(!C.sending)$('c-send-text').textContent=C.confirm?(at&&$('c-later').checked?'אישור תזמון ל-'+shortFmt.format(at)+' · '+nf.format(n)+(n===1?' נמען':' נמענים'):'אישור שליחה ל-'+nf.format(n)+(n===1?' נמען':' נמענים')):'המשך';}
+// Scheduled send: the date and time are Israel time.
+function laterAt(){if(!$('c-later').checked)return null;const d=$('c-later-date').value,t=$('c-later-time').value;return /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(d)&&/^[0-9]{2}:[0-9]{2}$/.test(t)?israelTime(d,t):null;}
 function edited(){C.confirm=false;C.batches=null;updateCompose();}
 function composeError(text){$('c-error').hidden=false;$('c-error').textContent=text;}
 function pickColumn(){const pc=phoneColumn(C.rows);const sel=$('c-column');sel.replaceChildren();
@@ -563,6 +577,8 @@ $('c-import-clear').addEventListener('click',function(){C.rows=null;C.imported=[
 $('c-save-list').addEventListener('click',function(){const r=recipients();if(!r.list.length){composeError('אין נמענים לשמירה');return;}$('compose').close();editList(null,r.list);});
 for(const id of ['c-to','c-body'])$(id).addEventListener('input',edited);
 $('c-from').addEventListener('change',function(){renderComposeFlows();edited();});
+$('c-later').addEventListener('change',function(){$('c-later-row').hidden=!this.checked;edited();});
+for(const id of ['c-later-date','c-later-time'])$(id).addEventListener('change',edited);
 $('c-flow').addEventListener('change',function(){applyComposeFlow();edited();});
 for(const id of ['c-close','c-cancel'])$(id).addEventListener('click',function(){$('compose').close();});
 // A test sends the message exactly as recipients would get it (including opt-out text for a multi-recipient send) to one number.
@@ -579,8 +595,11 @@ $('c-form').addEventListener('submit',async function(e){e.preventDefault();if(C.
  // Personalized messages go in batches of 40, each with its own send ID kept across retries, so retrying after a
  // failure sends only the batches that did not go out. Other messages go in one request, as before.
  const body=$('c-body').value;const flow=$('c-flow-row').hidden?'':$('c-flow').value;const stop=!flow&&!$('c-flow-row').hidden&&$('c-stop-bot').checked;
- const personal=usedVars(flow?((ME.flows||[]).find(function(f){return String(f.id)===flow;})||{first:''}).first:body).length>0;
- if(!C.batches){const size=personal?PERSONAL_BATCH:r.list.length;C.batches=[];for(let i=0;i<r.list.length;i+=size)C.batches.push({id:C.batches.length?crypto.randomUUID():C.id,list:r.list.slice(i,i+size),done:false});}
+ const personal=usedVars(flow?((ME.flows||[]).find(function(f){return String(f.id)===flow;})||{first:''}).first:body).length>0;const at=laterAt();
+ if(at){try{const d=await post('/api/send',{id:C.id,system_number:$('c-from').value,recipients:r.list,body:body,flow_id:flow?Number(flow):null,stop_bot:stop,send_at:at});
+   $('compose').close();toast(d.duplicate?'השליחה הזו כבר תוזמנה':'השליחה תוזמנה ל-'+shortFmt.format(d.send_at)+' · '+plural(d.recipients,'נמען אחד','נמענים'));}
+  catch(err){composeError(message(err));}finally{C.sending=false;C.confirm=false;updateCompose();}return;}
+ if(!C.batches){const size=personal&&!ME.settings.micropay_listjson?PERSONAL_BATCH:r.list.length;C.batches=[];for(let i=0;i<r.list.length;i+=size)C.batches.push({id:C.batches.length?crypto.randomUUID():C.id,list:r.list.slice(i,i+size),done:false});}
  const total={sent:0,accepted:0,rejected:0,unknown:0,opted:0,duplicate:false};
  try{for(let i=0;i<C.batches.length;i++){const b=C.batches[i];if(b.done)continue;if(C.batches.length>1)$('c-send-text').textContent='שולח '+nf.format(i+1)+' מתוך '+nf.format(C.batches.length)+'…';
    const d=await post('/api/send',{id:b.id,system_number:$('c-from').value,recipients:b.list,body:body,flow_id:flow?Number(flow):null,stop_bot:stop,bulk:r.list.length>1});
@@ -594,9 +613,29 @@ $('c-form').addEventListener('submit',async function(e){e.preventDefault();if(C.
  finally{C.sending=false;C.confirm=false;updateCompose();}});
 $('new').addEventListener('click',function(){openCompose();});
 
+// Scheduled sends: the user's own (admins see everyone's). Waiting sends can be moved or cancelled.
+const SCH_STATUS={scheduled:'ממתינה',sent:'נשלחה',failed:'נכשלה',cancelled:'בוטלה'};
+async function openScheduled(){let d;try{d=await get('/api/scheduled');}catch(e){toast(message(e));return;}const body=$('sch-rows');body.replaceChildren();
+ for(const s of d.scheduled){const tr=el('tr');const when=el('td');when.append(el('span','',shortFmt.format(s.send_at)));if(ME.role==='admin'&&s.email!==ME.email)when.append(el('span','sub-line',s.email));
+  const msg=el('td');msg.append(el('div','sch-body',(s.flow?'[בוט: '+s.flow+'] ':'')+s.body));msg.title=s.body;
+  const st=el('td');const r=s.result;let label=SCH_STATUS[s.status];if(s.status==='scheduled'&&s.progress)label='בשליחה '+nf.format(s.progress)+'/'+nf.format(s.recipients);st.append(el('span','tag'+(s.status==='failed'?' off':s.status==='sent'?' accent':''),label));
+  if(r)st.append(el('span','sub-line',(r.accepted?nf.format(r.accepted)+' נשלחו':'')+(r.unknown?' · '+nf.format(r.unknown)+' לא ידוע':'')+(r.rejected?' · '+nf.format(r.rejected)+' נדחו':'')+(r.opted_out?' · '+nf.format(r.opted_out)+' בהסרה':'')+(r.error?' · '+r.error:'')));
+  const act=el('td');if(s.status==='scheduled'&&!s.progress){const move=el('button','ghost','שינוי מועד');move.type='button';move.addEventListener('click',function(){rescheduleRow(act,s);});
+   const cancel=el('button','ghost danger','ביטול');cancel.type='button';cancel.addEventListener('click',async function(){if(!await confirmAction('ביטול שליחה מתוזמנת','לבטל את השליחה ל-'+plural(s.recipients,'נמען אחד','נמענים')+' שתוזמנה ל-'+shortFmt.format(s.send_at)+'?','ביטול השליחה'))return;
+    try{await post('/api/scheduled/cancel',{id:s.id});toast('השליחה בוטלה');openScheduled();}catch(e){toast(message(e));}});act.append(move,cancel);}
+  tr.append(when,cell2(labels.get(s.system_number)||local(s.system_number)),cell2(nf.format(s.recipients)),msg,st,act);body.append(tr);}
+ if(!d.scheduled.length){const tr=el('tr');const td=el('td','dash','אין שליחות מתוזמנות');td.colSpan=6;tr.append(td);body.append(tr);}
+ $('sch-note').textContent='נשלחות עד דקה אחרי המועד.';if(!$('sch-dlg').open)$('sch-dlg').showModal();}
+function cell2(t){return el('td','',t);}
+function rescheduleRow(cellEl,s){const box=el('span','sch-edit');const d=el('input'),t=el('input');d.type='date';t.type='time';d.value=ymd(s.send_at);const z=zoned(s.send_at);t.value=pad(z.hour)+':'+pad(z.minute);
+ const ok=el('button','ghost','שמירה');ok.type='button';ok.addEventListener('click',async function(){if(!d.value||!t.value)return;try{await post('/api/scheduled/reschedule',{id:s.id,send_at:israelTime(d.value,t.value)});toast('המועד עודכן');openScheduled();}catch(e){toast(message(e));}});
+ box.append(d,t,ok);cellEl.replaceChildren(box);}
+$('sched-btn').addEventListener('click',openScheduled);
+for(const id of ['sch-close','sch-done'])$(id).addEventListener('click',function(){$('sch-dlg').close();});
+
 title();
 (async function(){try{await loadMe();noNumbers=!ME.numbers.length;for(const n of ME.numbers)labels.set(n.number,n.label);
-  $('restricted-note').hidden=!ME.numbers.some(function(n){return n.restricted;});buildColumns();readUrl();$('q').value=state.q;const canSendAny=senders().length>0;$('new').hidden=!canSendAny;$('lists-btn').hidden=!canSendAny;}
+  $('restricted-note').hidden=!ME.numbers.some(function(n){return n.restricted;});buildColumns();readUrl();$('q').value=state.q;const canSendAny=senders().length>0;$('new').hidden=!canSendAny;$('lists-btn').hidden=!canSendAny;$('sched-btn').hidden=!canSendAny;}
  catch(e){fail(e,true);return;}
  await load();schedule();})();
 `;

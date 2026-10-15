@@ -1,0 +1,3 @@
+CREATE TABLE scheduled_sends (id TEXT PRIMARY KEY, email TEXT NOT NULL, system_number TEXT NOT NULL, body TEXT NOT NULL, recipients TEXT NOT NULL CHECK (json_valid(recipients)), invalid INTEGER NOT NULL DEFAULT 0, duplicates INTEGER NOT NULL DEFAULT 0, flow_id INTEGER, stop_bot INTEGER NOT NULL DEFAULT 0 CHECK (stop_bot IN (0,1)), send_at INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('scheduled','sent','failed','cancelled')), progress INTEGER NOT NULL DEFAULT 0, locked_until INTEGER, result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE INDEX idx_scheduled_due ON scheduled_sends(send_at) WHERE status='scheduled';
+CREATE INDEX idx_scheduled_email ON scheduled_sends(email, send_at);

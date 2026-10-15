@@ -7,7 +7,7 @@ import {saveContact} from './contacts';
 import {botBlock,botInfo} from './flows';
 import {admin} from './admin';
 import {lists} from './lists';
-import {send,preview,Fetcher} from './send';
+import {send,preview,scheduled,Fetcher} from './send';
 export type Options = {fetcher?:Fetcher;waitUntil?:(promise:Promise<unknown>)=>void};
 function html(body:string,nonce:string,status=200):Response { return new Response(body,{status,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Permissions-Policy':'camera=(), microphone=(), geolocation=()','Content-Security-Policy':`default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`}}); }
 // Writes must come from this dashboard's own pages: same Origin and a JSON body, which other sites cannot send without CORS.
@@ -23,6 +23,7 @@ export async function handle(request:Request,env:Env,who:string|Identity,options
  if (request.method==='POST') { sameOrigin(request);
   if (url.pathname==='/api/send') return send(request,env,user,options.fetcher??((input,init)=>fetch(input,init)));
   if (url.pathname==='/api/send/preview') return preview(request,env,user);
+  if (url.pathname.startsWith('/api/scheduled/')) return scheduled(request,url,env,user);
   if (url.pathname==='/api/me/prefs') return prefs(request,env,user);
   if (url.pathname==='/api/me/logout') return logout(env,user);
   if (url.pathname==='/api/contacts/save') return saveContact(request,env,user);
@@ -33,6 +34,7 @@ export async function handle(request:Request,env:Env,who:string|Identity,options
  if (request.method!=='GET') throw new HttpError(405,'GET or POST required');
  if (url.pathname==='/api/me') return me(env,user);
  if (url.pathname==='/api/bot/info') return botInfo(url,env,user);
+ if (url.pathname==='/api/scheduled') return scheduled(request,url,env,user);
  if (url.pathname==='/api/lists'||url.pathname.startsWith('/api/lists/')) return lists(request,url,env,user);
  if (url.pathname.startsWith('/api/admin/')) return admin(request,url,env,user,options.fetcher??((input,init)=>fetch(input,init)));
  if (url.pathname.startsWith('/api/')) return data(url,env,user);

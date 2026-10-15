@@ -46,6 +46,9 @@ The README documents setup, routes, field mapping and operations in detail.
 | `shared/forwarding.ts` | Webhook deliveries: queue, signed request, retries (ingest cron) |
 | `shared/micropay-send.ts` | One scheduleSms call, used by dashboard sends and API bot replies |
 | `shared/template.ts` | Message variables ({field}, {field|default}, {טלפון}) for sends and bot replies |
+| `shared/dispatch.ts` | Sending: prepareSend (permissions, recipients, variables, flow) and executeSend (opt-outs, daily limit, Micropay calls, records, bot state); used by the send button and scheduled sends |
+| `shared/scheduled.ts` | Scheduled sends, run by the ingest cron one batch at a time |
+| `shared/records.ts` | audit() and sentLast24h(), shared by both Workers |
 | `shared/bot.ts` | Bot engine: conversation state, option matching, replies, answers |
 | `workers/dashboard/src/forwards.ts` | `/api/admin/forwards*`: rules, delivery log, test, resend |
 | `workers/dashboard/src/flows.ts` | `/api/admin/flows*` (admins), `/api/bot/info` and `/api/bot/block` (users) |
@@ -56,7 +59,7 @@ The README documents setup, routes, field mapping and operations in detail.
 | `workers/dashboard/src/admin-page.ts` | Admin page |
 | `shared/validation.ts` | `Env`, phone and recipient normalization, body reading, cursors |
 | `shared/settings.ts` | Settings defaults and validation, opt-out word matching (also used by ingest) |
-| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id`; `0007_forwarding_bot.sql` forwarding rules and deliveries, bot flows, conversations, answers and blocks; `0008_bot_reply_via.sql` per-number bot reply method; `0009_view_restrictions.sql` per-assignment view start and conditions |
+| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id`; `0007_forwarding_bot.sql` forwarding rules and deliveries, bot flows, conversations, answers and blocks; `0008_bot_reply_via.sql` per-number bot reply method; `0009_view_restrictions.sql` per-assignment view start and conditions; `0010_scheduled_sends.sql` scheduled sends |
 | `tests/workers.test.ts` | Miniflare D1 tests: ingest, isolation, table queries, access, admin, sending (fake Micropay) |
 | `scripts/preview.ts` | Local preview with seeded data, live inserts and a fake Micropay (`npm run preview`; `PREVIEW_USER=agent@example.com` for a regular user) |
 
@@ -88,6 +91,8 @@ The README documents setup, routes, field mapping and operations in detail.
 - **The Micropay route repairs automation JSON.** Automations paste the message into their JSON template unescaped; raw control characters are escaped and, failing that, known fields are read by name (`lenientJson` in `micropay.ts`). Keep other routes strict.
 - **Every message query must start from `scope()`** (scope.ts). It returns the user's visibility SQL, including view restrictions, and needs contacts joined as `c`. Unrestricted users keep the single `+m.system_number IN (…)` condition, so their queries are unchanged.
 - **Personalized sends are batched by the browser (40 recipients)** because each distinct text is one Micropay call and the free plan allows 50 outgoing calls per request. Plain sends stay one call.
+- **The ingest cron takes turns:** a due scheduled send (one batch) first, otherwise forwarding retries, because one invocation may make only 50 outgoing calls and 50 D1 queries on the free plan. Scheduled batches use send IDs `<id>:<offset>`, so a batch is never sent twice.
+- **micropay_listjson is unverified against the real API** until the owner sends a personalized test with it on. If Micropay rejects the format, turn the setting off; the per-text calls keep working.
 - **Statements over many rows use `json_each`** (imports, flow starts, bot blocks) rather than one statement per row, for the same 50-query limit.
 - **Lists are expanded in the browser** into recipients; the send endpoint stays the single place that validates and limits recipients.
 - **Cursors are UTF-8 base64url**, because contact sort values can be Hebrew.
@@ -176,6 +181,12 @@ Found on 2026-10-13: messages on the bot's number come from a Micropay automatio
 
 1. Done: applied `0009` before deploying.
 2. Done: deployed the dashboard.
+
+## Rollout of scheduled sends
+
+1. Apply `0010` (`npm run db:migrate`) before deploying.
+2. Deploy ingest (the cron now runs scheduled sends; it needs `MICROPAY_TOKEN`, already set), then the dashboard.
+3. Optional: turn on "הודעות אישיות בקריאה אחת" in Settings after a personalized test send to the owner's phone works.
 
 ## Micropay automation webhook
 

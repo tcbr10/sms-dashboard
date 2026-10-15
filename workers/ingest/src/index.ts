@@ -4,6 +4,7 @@ import {DEFAULT_SETTINGS, isOptOut} from '../../../shared/settings';
 import {Fetch, deliver, enqueue, runDue} from '../../../shared/forwarding';
 import {handleIncoming} from '../../../shared/bot';
 import {sendMicropay} from '../../../shared/micropay-send';
+import {runScheduled} from '../../../shared/scheduled';
 async function equal(a: string, b: string): Promise<boolean> { const hash = async (s: string) => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))); const [x,y] = await Promise.all([hash(a),hash(b)]); let difference = 0; for (let i=0;i<x.length;i++) difference |= x[i] ^ y[i]; return difference === 0; }
 // Micropay can only be configured with a URL, so its route also accepts ?token=.
 async function authorize(request: Request, expected: string | undefined, allowQuery = false): Promise<void> {
@@ -76,6 +77,10 @@ export async function ingest(request: Request, env: Env, options: Options = {}):
 }
 export default {
  async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> { try { return await ingest(request,env,ctx?{waitUntil:p=>ctx.waitUntil(p)}:{}); } catch (error) { return failure(error); } },
- // Cron trigger (every minute): retries forwarding deliveries that are due.
- async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> { ctx.waitUntil(runDue(env,(u,i)=>fetch(u,i))); },
+ // Cron trigger (every minute): sends one batch of a due scheduled send, or else retries forwarding deliveries. They
+ // take turns because one invocation may make only 50 outgoing calls and 50 D1 queries on the free plan.
+ async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  const fetcher: Fetch = (u,i) => fetch(u,i);
+  ctx.waitUntil((async () => { const busy = await runScheduled(env,fetcher).catch(e => { console.error('Scheduled send failed', e instanceof Error ? e.message : e); return false; }); if (!busy) await runDue(env,fetcher); })());
+ },
 };
