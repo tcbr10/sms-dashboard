@@ -8,7 +8,7 @@ A Hebrew RTL dashboard of SMS traffic on the owner's Micropay numbers, with user
 
 - **Ingest Worker** (`workers/ingest`). Receives Micropay's incoming-SMS callbacks and outgoing-message logs, and stores them in D1. It sits on its own custom domain; `workers.dev` and preview URLs are off.
 - **Dashboard Worker** (`workers/dashboard`). Behind Cloudflare Access on its own custom domain. Every request verifies the Access JWT, then requires an active row in `users`; that table, not the Access policy, is the allowlist. Users see and send only from their assigned numbers; admins see every active number and manage everything at `/admin`.
-- **Links Worker** (`workers/links`, not deployed yet). The public short-link domain: redirects tracked links in sent messages and counts the clicks. No Access; it only reads and counts links.
+- **Links Worker** (`workers/links`). The public short-link domain: redirects tracked links in sent messages and counts the clicks. No Access; it only reads and counts links.
 
 The README documents setup, routes, field mapping and operations in detail.
 
@@ -17,11 +17,11 @@ The README documents setup, routes, field mapping and operations in detail.
 | Area | State |
 | --- | --- |
 | Code | `main` is pushed to GitHub. CI runs typecheck and tests on every push. |
-| Dashboard | Deployed (version `85e39cd4`): scheduled sends, single-call personalized setting (off), message variables, view restrictions, export with one row per number, up to 20 contact fields with a manage-fields dialog, per-number bot reply method, webhook forwarding and bot tabs, number parsing with import reports, Access sync (token set, working), message import, read-usage fix, typed recent-hours filter, table with column choice and header filters (including hours), profile menu with sign-out, contact editing by users, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
-| Ingest | Deployed (version `5e3caf58`) with scheduled sends on the cron, variables in bot replies, lenient JSON for Micropay automations (multi-line messages), bot replies through the response or Micropay's API, the two-secret auth, opt-out detection, bot replies, webhook forwarding and an every-minute cron for delivery retries. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
+| Dashboard | Deployed (version `97d5abd5`): tracked links (compose checkbox, clicks column), scheduled sends, single-call personalized setting (off), message variables, view restrictions, export with one row per number, up to 20 contact fields with a manage-fields dialog, per-number bot reply method, webhook forwarding and bot tabs, number parsing with import reports, Access sync (token set, working), message import, read-usage fix, typed recent-hours filter, table with column choice and header filters (including hours), profile menu with sign-out, contact editing by users, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
+| Ingest | Deployed (version `b5c9443c`) with tracked links in scheduled sends, scheduled sends on the cron, variables in bot replies, lenient JSON for Micropay automations (multi-line messages), bot replies through the response or Micropay's API, the two-secret auth, opt-out detection, bot replies, webhook forwarding and an every-minute cron for delivery retries. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
-| Tracked links | Built, tested and checked in the local preview; **not deployed**. Needs migration `0011`, a short hostname for the links Worker, and `link_base` in Settings (see the rollout below). |
-| D1 | `0001` to `0010` applied (`0011` waits for the tracked-links rollout). On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
+| Links | Deployed (version `b6efa440`) on its own subdomain of the owner's domain; `link_base` is set in Settings. Checked live: robots.txt, 404 for unknown codes, 302 and click counting on a temporary link (deleted). A tap from a phone has not been tried yet. |
+| D1 | `0001` to `0011` applied. On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
 | Outgoing logging | Not wired yet. Nothing posts to `/events/outgoing`, so the dashboard shows incoming messages only. |
 
 ## Local-only state on the owner's machine
@@ -96,6 +96,7 @@ The README documents setup, routes, field mapping and operations in detail.
 - **Every message query must start from `scope()`** (scope.ts). It returns the user's visibility SQL, including view restrictions, and needs contacts joined as `c`. Unrestricted users keep the single `+m.system_number IN (…)` condition, so their queries are unchanged.
 - **Personalized sends are batched by the browser (40 recipients)** because each distinct text is one Micropay call and the free plan allows 50 outgoing calls per request. Plain sends stay one call.
 - **The ingest cron takes turns:** a due scheduled send (one batch) first, otherwise forwarding retries, because one invocation may make only 50 outgoing calls and 50 D1 queries on the free plan. Scheduled batches use send IDs `<id>:<offset>`, so a batch is never sent twice.
+- **Clicks from a VPN or cloud network count as automatic.** A test with curl from the owner's Mac (whose traffic leaves through France) was counted as automatic, as designed; test with a phone on its normal connection.
 - **micropay_listjson is unverified against the real API** until the owner sends a personalized test with it on. If Micropay rejects the format, turn the setting off; the per-text calls keep working.
 - **Statements over many rows use `json_each`** (imports, flow starts, bot blocks) rather than one statement per row, for the same 50-query limit.
 - **Lists are expanded in the browser** into recipients; the send endpoint stays the single place that validates and limits recipients.
@@ -199,6 +200,8 @@ Found on 2026-10-13: messages on the bot's number come from a Micropay automatio
 3. Optional: turn on "הודעות אישיות בקריאה אחת" in Settings after a personalized test send to the owner's phone works.
 
 ## Rollout of tracked links
+
+Done on 2026-10-22 except step 6.
 
 1. Choose the short hostname. A subdomain of a domain already on this Cloudflare account is free (for example `l.` plus the domain); a new short domain costs about $10 a year. Every tracked link starts with it, and Hebrew SMS parts are 70 characters, so shorter is cheaper.
 2. `cp workers/links/wrangler.jsonc.example workers/links/wrangler.jsonc` and fill in the database ID and the hostname. Never put an Access application on this hostname.
