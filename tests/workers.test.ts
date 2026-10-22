@@ -1,4 +1,4 @@
-import {afterAll,beforeAll,beforeEach,describe,expect,it} from 'vitest';
+import {afterAll,beforeAll,beforeEach,describe,expect,it,vi} from 'vitest';
 import {Miniflare} from 'miniflare';
 import {readFile,readdir} from 'node:fs/promises';
 import ingestion,{ingest} from '../workers/ingest/src/index';
@@ -10,11 +10,13 @@ import {User} from '../workers/dashboard/src/users';
 import {Env,encodeCursor,failure,parseRecipient} from '../shared/validation';
 import {PHONE_JS} from '../workers/dashboard/src/ui';
 import {micropaySubmission} from '../shared/micropay-submission';
+import {redirect} from '../workers/links/src/index';
+import {LINKS_JS,findLinks} from '../shared/links';
 let mf:Miniflare;let env:Env;
 const number='+972501234567',other='+972501234568',peer='+972509876543',token='a'.repeat(40),outToken='b'.repeat(40),message='שלום 👋\n& + "בדיקה" %20';
 beforeAll(async()=>{mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("test")}}',compatibilityDate:'2026-08-06',d1Databases:{DB:'sms-test'}});const bindings=await mf.getBindings();env={DB:bindings.DB as D1Database,INCOMING_TOKEN:token,OUTGOING_TOKEN:outToken};const dir=new URL('../migrations/',import.meta.url);for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(file,dir),'utf8')).split(';').filter(s=>s.trim()))await env.DB.prepare(sql).run();});
 afterAll(async()=>{await mf?.dispose();});
-beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','imports','forward_rules','deliveries','flows','conversations','bot_answers','bot_blocks','scheduled_sends','system_numbers'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers (number,label,active) VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
+beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','imports','forward_rules','deliveries','flows','conversations','bot_answers','bot_blocks','scheduled_sends','links','system_numbers'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers (number,label,active) VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
 const user=(email:string,role:'admin'|'user'='user'):User=>({email,name:'',role,can_bulk_send:0,daily_limit:null,density:null,columns:null,test_number:null,sessions_revoked_at:null,can_edit_contacts:1});
 const ctx={waitUntil(){},passThroughOnException(){}} as unknown as ExecutionContext;
 function send(body:Record<string,unknown>,out=false,secret=out?outToken:token){return ingestion.fetch(new Request('https://ingest.test'+(out?'/events/outgoing':'/hooks/incoming'),{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+secret},body:JSON.stringify({event_id:'event-1',system_number:number,peer_number:peer,body:message,...body})}),env);}
@@ -441,4 +443,73 @@ describe('D1 rows read',()=>{
 describe('Micropay submission responses',()=>{
  it('recognizes plain and JSON queue acceptance, including validate variants',()=>{for(const raw of ['OK 34556','OK 250 34556','OK VALID 34556',{status:1,message:'OK',data:{taskId:'34556'}}])expect(micropaySubmission(raw)).toEqual({submission_status:'accepted',task_id:'34556'});});
  it('does not treat status=1 alone, timeouts or unknown responses as acceptance',()=>{expect(micropaySubmission({status:1,message:'NOT_ENOUGH_CREDIT'})).toEqual({submission_status:'unknown'});expect(micropaySubmission('timeout')).toEqual({submission_status:'unknown'});expect(micropaySubmission({status:0,message:'ERROR'})).toEqual({submission_status:'rejected'});expect(micropaySubmission('ERROR --> Description: invalid token')).toEqual({submission_status:'rejected'});});
+});
+describe('tracked links',()=>{
+ const third='+972509876544',base='https://l.test',iphone='Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1';
+ const calls:{msg?:string;list?:string;listjson?:Record<string,string>}[]=[];const fetcher=async(_u:string,init:RequestInit)=>{calls.push(JSON.parse(String(init.body)));return new Response('OK '+calls.length);};
+ const sendAs=(b:Record<string,unknown>,email='admin@example.com')=>handle(new Request(ORIGIN+'/api/send',{method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify({id:crypto.randomUUID(),system_number:number,recipients:[peer,third],body:'מבצע https://shop.example.com/sale ושוב www.shop.example.com.',...b})}),{...env,MICROPAY_TOKEN:'t'},email,{fetcher}).catch(failure);
+ // Opens a link like a phone would, waiting for the click to be counted.
+ async function open(code:string,init:RequestInit&{agent?:string}={}){const pending:Promise<unknown>[]=[];const r=await redirect(new Request(base+'/'+code,{method:init.method,headers:init.agent===''?{}:{'User-Agent':init.agent??iphone}}),env,p=>pending.push(p));await Promise.all(pending);return r;}
+ const links=async()=>(await env.DB.prepare('SELECT code,peer_number,url,clicks,auto_clicks,first_click_at FROM links ORDER BY peer_number,url').all<{code:string;peer_number:string;url:string;clicks:number;auto_clicks:number;first_click_at:number|null}>()).results;
+ const message=(n:string)=>env.DB.prepare("SELECT body,clicks,auto_clicks,clicked_at FROM messages WHERE direction='out' AND peer_number=?").bind(n).first<{body:string;clicks:number|null;auto_clicks:number|null;clicked_at:number|null}>();
+ // Links made in a test are moments old, which would make every click look automatic.
+ const age=()=>env.DB.prepare('UPDATE links SET created_at=created_at-60000').run();
+ beforeEach(async()=>{calls.length=0;await api('admin@example.com','/api/admin/settings',{link_base:base+'/'});});
+ const cases:[string,string[]][]=[['ראו https://example.com/a?b=1.',['https://example.com/a?b=1']],['www.site.co.il, תודה',['https://www.site.co.il']],['(https://ex.com/x)',['https://ex.com/x']],
+  ['שניים: https://a.com https://b.org/p?q="x"',['https://a.com','https://b.org/p?q=']],['אתר: https://ex.co.il/דף-הבית!',['https://ex.co.il/דף-הבית']],['HTTPS://EX.COM/Path',['HTTPS://EX.COM/Path']],
+  ['http://localhost:3000 ו-https://intranet',[]],['mail@x.com או x.com',[]],['https://ex.com…\nשורה',['https://ex.com']]];
+ const browser=new Function(LINKS_JS+';return findLinks;')() as typeof findLinks;
+ it.each(cases)('finds the links in %s',(text,urls)=>{expect(findLinks(text).map(f=>f.url)).toEqual(urls);expect(browser(text)).toEqual(findLinks(text));});
+ it('validates the link address setting',async()=>{expect(await body(api('admin@example.com','/api/admin/settings',{}))).toMatchObject({link_base:base});
+  for(const v of ['l.test','http://l.test','https://l.test/x','https://l_test.com'])expect((await api('admin@example.com','/api/admin/settings',{link_base:v})).status).toBe(400);
+  expect(await body(api('admin@example.com','/api/admin/settings',{link_base:'http://localhost:8792'}))).toMatchObject({link_base:'http://localhost:8792'});
+  expect(await body(api('admin@example.com','/api/admin/settings',{link_base:''}))).toMatchObject({link_base:''});expect((await sendAs({track_links:true})).status).toBe(400);});
+ it('gives every recipient their own short link for each link, stored before Micropay is called',async()=>{
+  const d=await body(sendAs({track_links:true}));expect(d).toMatchObject({status:'accepted',sent:2});expect(calls).toHaveLength(2);
+  const l=await links();expect(l.map(x=>[x.peer_number,x.url])).toEqual([[peer,'https://shop.example.com/sale'],[peer,'https://www.shop.example.com'],[third,'https://shop.example.com/sale'],[third,'https://www.shop.example.com']]);
+  expect(new Set(l.map(x=>x.code)).size).toBe(4);for(const x of l)expect(x.code).toMatch(/^[A-Za-z0-9]{7}$/);
+  const m=await message(peer);const mine=l.filter(x=>x.peer_number===peer);expect(m).toMatchObject({clicks:0,auto_clicks:0,clicked_at:null});
+  expect(m!.body).toBe('מבצע '+base+'/'+mine.find(x=>x.url.endsWith('/sale'))!.code+' ושוב '+base+'/'+mine.find(x=>x.url.includes('www'))!.code+'.');
+  expect(calls.map(c=>c.msg!.replace(/\r\n/g,'\n')).sort()).toEqual([m!.body,(await message(third))!.body].sort());
+  const log=JSON.parse((await env.DB.prepare("SELECT details FROM audit_log WHERE action='send'").first<{details:string}>())!.details);expect(log).toMatchObject({personalized:true,calls:2,tracked_links:4});
+  calls.length=0;await env.DB.prepare('DELETE FROM messages').run();expect(await body(sendAs({}))).toMatchObject({status:'accepted',sent:2});expect(calls).toHaveLength(1);
+  expect(calls[0].msg).toBe('מבצע https://shop.example.com/sale ושוב www.shop.example.com.');expect((await message(peer))!.clicks).toBeNull();});
+ it('retries with new codes when a code is already taken',async()=>{const spy=vi.spyOn(crypto,'getRandomValues');
+  // The first four codes come out the same, so storing the first attempt's links fails on the primary key.
+  for(let i=0;i<4;i++)spy.mockImplementationOnce((a=>a) as typeof crypto.getRandomValues);
+  try{expect(await body(sendAs({track_links:true}))).toMatchObject({status:'accepted',sent:2});}finally{spy.mockRestore();}
+  const codes=(await links()).map(x=>x.code);expect(new Set(codes).size).toBe(4);expect(codes).not.toContain('AAAAAAA');expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM sends').first<{n:number}>())!.n).toBe(1);});
+ it('tracks links filled in from variables and leaves the opt-out text alone, and refuses a message without links',async()=>{
+  await api('admin@example.com','/api/admin/settings',{optout_text:'להסרה https://optout.example.com'});await api('admin@example.com','/api/admin/contacts/save',{number:peer,data:{name:'dana'}});
+  await sendAs({body:'https://site.example.com/{שם|guest}',track_links:true});
+  expect((await links()).map(x=>x.url)).toEqual(['https://site.example.com/dana','https://site.example.com/guest']);expect((await message(peer))!.body).toMatch(/^https:\/\/l\.test\/[A-Za-z0-9]{7}\nלהסרה https:\/\/optout\.example\.com$/);
+  expect(await body(sendAs({body:'אין כאן קישור',track_links:true}))).toEqual({error:'The message has no links to track'});
+  calls.length=0;expect((await sendAs({recipients:Array.from({length:41},(_,i)=>'05090000'+String(i).padStart(2,'0')),track_links:true})).status).toBe(413);expect(calls).toHaveLength(0);});
+ it('redirects at once and counts taps by people apart from automatic opens',async()=>{
+  await sendAs({body:'https://shop.example.com/sale',track_links:true});const code=(await links()).find(x=>x.peer_number===peer)!.code;
+  const first=await open(code,{agent:'facebookexternalhit/1.1 Facebot Twitterbot/1.0'});expect(first.status).toBe(302);expect(first.headers.get('location')).toBe('https://shop.example.com/sale');
+  expect(await message(peer)).toMatchObject({clicks:0,auto_clicks:1});await open(code);expect(await message(peer)).toMatchObject({clicks:0,auto_clicks:2});
+  await age();await open(code,{method:'HEAD'});expect(await message(peer)).toMatchObject({clicks:0,auto_clicks:2});
+  const before=Date.now();expect((await open(code)).status).toBe(302);const m=await message(peer);expect(m).toMatchObject({clicks:1,auto_clicks:2});expect(m!.clicked_at).toBeGreaterThanOrEqual(before);
+  await open(code);expect((await message(peer))!.clicks).toBe(1);
+  await env.DB.prepare('UPDATE links SET last_click_at=last_click_at-60000').run();await open(code+'.');expect(await message(peer)).toMatchObject({clicks:2,clicked_at:m!.clicked_at});
+  await open(code,{agent:''});for(let i=0;i<5;i++)await open(code,{agent:'curl/8.0'});expect((await message(peer))!.auto_clicks).toBe(5);expect((await message(third))!.clicks).toBe(0);
+  for(const path of ['ZZZZZZZ','abc','',code+'x'])expect((await open(path)).status).toBe(404);expect((await open('ZZZZZZZ')).headers.get('cache-control')).toBe('no-store');
+  expect((await redirect(new Request(base+'/'+code,{method:'POST'}),env,()=>{})).status).toBe(405);});
+ it('shows clicks in the table: filters, sorting and live updates',async()=>{
+  await env.DB.prepare("UPDATE user_numbers SET can_send=1 WHERE email='alice@example.com' AND system_number=?").bind(number).run();
+  await sendAs({body:'https://shop.example.com',track_links:true});await sendAs({recipients:[peer],body:'בלי מעקב'});await age();
+  const ids=async(q:string)=>(await read('alice@example.com',q)).messages.map(m=>[m.peer_number,m.clicks]);
+  const opened=await read('alice@example.com');const sync=(opened as unknown as {sync_cursor:string}).sync_cursor;
+  await open((await links()).find(x=>x.peer_number===third)!.code);
+  expect(await ids('?clicks=clicked')).toEqual([[third,1]]);expect(await ids('?clicks=none')).toEqual([[peer,0]]);expect(await ids('?clicks=clicked,none&sort=clicks&order=desc')).toEqual([[third,1],[peer,0]]);
+  expect(await ids('?clicks=auto')).toEqual([]);await expect(data(new URL(ORIGIN+'/api/messages?clicks=yes'),env,user('alice@example.com'))).rejects.toThrow('Invalid clicks');
+  const page1=await data(new URL(ORIGIN+'/api/messages?sort=clicks&order=asc&limit=1'),env,user('alice@example.com')).then(r=>r.json()) as {messages:{clicks:number|null}[];next_cursor:string};
+  expect(page1.messages[0].clicks).toBeNull();const page2=await read('alice@example.com','?sort=clicks&order=asc&limit=5&cursor='+page1.next_cursor);expect(page2.messages.map(m=>m.clicks)).toEqual([0,1]);
+  const live=await read('alice@example.com','?since='+sync);expect(live.messages.map(m=>[m.peer_number,m.clicks])).toEqual([[third,1]]);});
+ it('tracks links in scheduled sends when they go out',async()=>{
+  const d=await body(sendAs({track_links:true,send_at:Date.now()+3600000}));expect(d).toMatchObject({scheduled:true});expect(await links()).toHaveLength(0);
+  expect((await body(api('admin@example.com','/api/scheduled')) as {scheduled:{track_links:number}[]}).scheduled[0].track_links).toBe(1);
+  await env.DB.prepare('UPDATE scheduled_sends SET send_at=1').run();expect(await runScheduled({...env,MICROPAY_TOKEN:'t'},fetcher)).toBe(true);
+  expect(await links()).toHaveLength(4);expect((await message(peer))!.body).toMatch(/^מבצע https:\/\/l\.test\/[A-Za-z0-9]{7} ושוב/);});
 });

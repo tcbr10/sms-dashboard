@@ -1,11 +1,12 @@
 // Local UI preview (npm run preview): the real dashboard router, data layer and ingest Worker against an in-memory
 // Miniflare D1 with seeded messages, since the deployed dashboard requires Cloudflare Access. Micropay is faked, so
-// nothing is ever sent. PREVIEW_USER picks the signed-in email (default the admin; agent@example.com is a regular user).
+// nothing is ever sent. Tracked links point at a local copy of the links Worker (port+1). PREVIEW_USER picks the signed-in email (default the admin; agent@example.com is a regular user).
 import {createServer} from 'node:http';
 import {readFile, readdir} from 'node:fs/promises';
 import {Miniflare} from 'miniflare';
 import {handle} from '../workers/dashboard/src/index';
 import ingestion from '../workers/ingest/src/index';
+import {redirect} from '../workers/links/src/index';
 import {failure} from '../shared/validation';
 
 const migrations = new URL('../migrations/', import.meta.url);
@@ -27,6 +28,8 @@ const texts = ['שלום, אפשר פרטים על המבצע?', 'תודה רב�
 const replies = ['שלום! המבצע בתוקף עד סוף החודש. לפרטים: 03-5551234', 'התור שלך נקבע ליום שני ב-10:00', 'המשלוח לחיפה עולה 35 ₪', 'החשבונית נשלחה למייל 👍'];
 const statuses = ['accepted', 'accepted', 'accepted', 'pending', 'rejected', 'unknown'];
 const now = Date.now();
+const port = Number(process.env.PORT || 8791), linksPort = port + 1;
+await env.DB.prepare("INSERT INTO settings (key,value) VALUES ('link_base',?)").bind(JSON.stringify('http://localhost:' + linksPort)).run();
 let n = 0;
 async function post(path: string, secret: string, body: Record<string, unknown>) {
  const r = await ingestion.fetch(new Request('https://ingest.local' + path, {method: 'POST', headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + secret}, body: JSON.stringify(body)}), env as never);
@@ -48,7 +51,6 @@ setInterval(async () => {
 let task = 1000;
 const fakeMicropay = async (_url: string, init: RequestInit) => { const {token: _, ...request} = JSON.parse(String(init.body)); console.log('[fake Micropay]', JSON.stringify(request)); return new Response('OK ' + (++task)); };
 
-const port = Number(process.env.PORT || 8791);
 createServer(async (req, res) => {
  const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(chunk as Buffer);
  const url = 'http://localhost:' + port + (req.url || '/');
@@ -59,3 +61,9 @@ createServer(async (req, res) => {
  res.writeHead(response.status, Object.fromEntries(response.headers));
  res.end(Buffer.from(await response.arrayBuffer()));
 }).listen(port, () => console.log('preview on http://localhost:' + port + ' as ' + email));
+// The links Worker, so tracked links in sent messages can be opened from the browser.
+createServer(async (req, res) => {
+ const headers = new Headers(); for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') headers.set(k, v);
+ const response = await redirect(new Request('http://localhost:' + linksPort + (req.url || '/'), {method: req.method, headers}), env, p => { p.then(() => console.log('[links] counted', req.url)); });
+ res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(Buffer.from(await response.arrayBuffer()));
+}).listen(linksPort, () => console.log('links on http://localhost:' + linksPort));

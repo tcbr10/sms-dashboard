@@ -1,6 +1,6 @@
 # Session handoff
 
-Last updated 2026-10-15. Read this before changing or deploying anything. The repository is **public**: never commit secrets, emails, phone numbers, account or database IDs, Access values or hostnames. Those live only in the local config files described below.
+Last updated 2026-10-22. Read this before changing or deploying anything. The repository is **public**: never commit secrets, emails, phone numbers, account or database IDs, Access values or hostnames. Those live only in the local config files described below.
 
 ## What this is
 
@@ -8,6 +8,7 @@ A Hebrew RTL dashboard of SMS traffic on the owner's Micropay numbers, with user
 
 - **Ingest Worker** (`workers/ingest`). Receives Micropay's incoming-SMS callbacks and outgoing-message logs, and stores them in D1. It sits on its own custom domain; `workers.dev` and preview URLs are off.
 - **Dashboard Worker** (`workers/dashboard`). Behind Cloudflare Access on its own custom domain. Every request verifies the Access JWT, then requires an active row in `users`; that table, not the Access policy, is the allowlist. Users see and send only from their assigned numbers; admins see every active number and manage everything at `/admin`.
+- **Links Worker** (`workers/links`, not deployed yet). The public short-link domain: redirects tracked links in sent messages and counts the clicks. No Access; it only reads and counts links.
 
 The README documents setup, routes, field mapping and operations in detail.
 
@@ -19,7 +20,8 @@ The README documents setup, routes, field mapping and operations in detail.
 | Dashboard | Deployed (version `85e39cd4`): scheduled sends, single-call personalized setting (off), message variables, view restrictions, export with one row per number, up to 20 contact fields with a manage-fields dialog, per-number bot reply method, webhook forwarding and bot tabs, number parsing with import reports, Access sync (token set, working), message import, read-usage fix, typed recent-hours filter, table with column choice and header filters (including hours), profile menu with sign-out, contact editing by users, row spacing, users and roles, admin page, contacts, export, disconnect, sending with test sends and distribution lists. Access protection verified: unauthenticated requests get 302 to the Access login. Sending answers 503 until `MICROPAY_TOKEN` is set. |
 | Ingest | Deployed (version `5e3caf58`) with scheduled sends on the cron, variables in bot replies, lenient JSON for Micropay automations (multi-line messages), bot replies through the response or Micropay's API, the two-secret auth, opt-out detection, bot replies, webhook forwarding and an every-minute cron for delivery retries. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
-| D1 | `0001` to `0010` applied. On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
+| Tracked links | Built, tested and checked in the local preview; **not deployed**. Needs migration `0011`, a short hostname for the links Worker, and `link_base` in Settings (see the rollout below). |
+| D1 | `0001` to `0010` applied (`0011` waits for the tracked-links rollout). On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
 | Outgoing logging | Not wired yet. Nothing posts to `/events/outgoing`, so the dashboard shows incoming messages only. |
 
 ## Local-only state on the owner's machine
@@ -48,6 +50,8 @@ The README documents setup, routes, field mapping and operations in detail.
 | `shared/template.ts` | Message variables ({field}, {field|default}, {טלפון}) for sends and bot replies |
 | `shared/dispatch.ts` | Sending: prepareSend (permissions, recipients, variables, flow) and executeSend (opt-outs, daily limit, Micropay calls, records, bot state); used by the send button and scheduled sends |
 | `shared/scheduled.ts` | Scheduled sends, run by the ingest cron one batch at a time |
+| `shared/links.ts` | Tracked links: finding links (`findLinks`, and `LINKS_JS` for the browser, kept identical), codes, replacing links per recipient, classifying and counting clicks |
+| `workers/links/src/index.ts` | Links Worker: `GET /<code>` redirect, click counting after the response, 404 page, robots.txt |
 | `shared/records.ts` | audit() and sentLast24h(), shared by both Workers |
 | `shared/bot.ts` | Bot engine: conversation state, option matching, replies, answers |
 | `workers/dashboard/src/forwards.ts` | `/api/admin/forwards*`: rules, delivery log, test, resend |
@@ -59,9 +63,9 @@ The README documents setup, routes, field mapping and operations in detail.
 | `workers/dashboard/src/admin-page.ts` | Admin page |
 | `shared/validation.ts` | `Env`, phone and recipient normalization, body reading, cursors |
 | `shared/settings.ts` | Settings defaults and validation, opt-out word matching (also used by ingest) |
-| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id`; `0007_forwarding_bot.sql` forwarding rules and deliveries, bot flows, conversations, answers and blocks; `0008_bot_reply_via.sql` per-number bot reply method; `0009_view_restrictions.sql` per-assignment view start and conditions; `0010_scheduled_sends.sql` scheduled sends |
+| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id`; `0007_forwarding_bot.sql` forwarding rules and deliveries, bot flows, conversations, answers and blocks; `0008_bot_reply_via.sql` per-number bot reply method; `0009_view_restrictions.sql` per-assignment view start and conditions; `0010_scheduled_sends.sql` scheduled sends; `0011_tracked_links.sql` links (WITHOUT ROWID, one written row per link), click columns on messages, `track_links` on scheduled sends |
 | `tests/workers.test.ts` | Miniflare D1 tests: ingest, isolation, table queries, access, admin, sending (fake Micropay) |
-| `scripts/preview.ts` | Local preview with seeded data, live inserts and a fake Micropay (`npm run preview`; `PREVIEW_USER=agent@example.com` for a regular user) |
+| `scripts/preview.ts` | Local preview with seeded data, live inserts, a fake Micropay and the links Worker on port 8792 (`npm run preview`; `PREVIEW_USER=agent@example.com` for a regular user) |
 
 ## Decisions and their reasons
 
@@ -96,6 +100,11 @@ The README documents setup, routes, field mapping and operations in detail.
 - **Statements over many rows use `json_each`** (imports, flow starts, bot blocks) rather than one statement per row, for the same 50-query limit.
 - **Lists are expanded in the browser** into recipients; the send endpoint stays the single place that validates and limits recipients.
 - **Cursors are UTF-8 base64url**, because contact sort values can be Hebrew.
+- **Tracked links are self-hosted** on a third Worker rather than a shortener service: each recipient needs a link of their own, and the services' free plans allow 5 to 25 links a month (Short.io about 1,000 in total). The links Worker is separate from ingest so public click traffic can never affect Micropay's route.
+- **The short-link address is a D1 setting (`link_base`), not a Worker variable,** because both the dashboard (send button) and ingest (scheduled sends) create links. It also keeps the hostname out of the repo.
+- **Clicks are written onto `messages`** (`clicks`, `auto_clicks`, `clicked_at`, plus `updated_at`), so the table and live polling read them without a join. The links table has no index besides its primary key; a per-send report (phase 2) will need one on `send_id`.
+- **Automatic opens are counted apart from taps.** Previews and scanners open links without a person; see the README for the rules. They are a guess, which is why the table says "נפתח אוטומטית בלבד" rather than hiding them.
+- **Tracked sends count as personalized** for batching, because each recipient's text differs. Without listjson that means one Micropay call per recipient, so `micropay_listjson` matters more once tracking is used.
 
 ## Working on the UI
 
@@ -112,6 +121,7 @@ npm run typecheck && npm test
 npm run preview
 npm run deploy:dashboard
 npm run deploy:ingest
+npm run deploy:links
 npx wrangler tail --config workers/ingest/wrangler.jsonc
 npx wrangler d1 execute sms-dashboard --remote --config workers/ingest/wrangler.jsonc --command "SELECT ..."
 ```
@@ -187,6 +197,15 @@ Found on 2026-10-13: messages on the bot's number come from a Micropay automatio
 1. Done: applied `0010`.
 2. Done: deployed ingest, then the dashboard.
 3. Optional: turn on "הודעות אישיות בקריאה אחת" in Settings after a personalized test send to the owner's phone works.
+
+## Rollout of tracked links
+
+1. Choose the short hostname. A subdomain of a domain already on this Cloudflare account is free (for example `l.` plus the domain); a new short domain costs about $10 a year. Every tracked link starts with it, and Hebrew SMS parts are 70 characters, so shorter is cheaper.
+2. `cp workers/links/wrangler.jsonc.example workers/links/wrangler.jsonc` and fill in the database ID and the hostname. Never put an Access application on this hostname.
+3. Apply `0011` (`npm run db:migrate`) before deploying anything, because sends now write the click columns.
+4. Deploy the links Worker (`npm run deploy:links`), then ingest, then the dashboard. Open `https://<hostname>/robots.txt` and an unknown code to check it answers.
+5. In Settings, set "כתובת הקישורים המקוצרים" to `https://<hostname>`.
+6. Send a tracked test to your own phone, tap the link, and check the "לחיצות" column (add it from "עמודות").
 
 ## Micropay automation webhook
 

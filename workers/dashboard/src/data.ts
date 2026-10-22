@@ -7,10 +7,14 @@ type Row = {id:number;sort_key:number|string;contact:string|null;[key:string]:un
 const FROM = 'messages m LEFT JOIN contacts c ON c.number=m.peer_number LEFT JOIN sends s ON s.id=m.send_id';
 // Counts join contacts only when a search or contact filter needs them; D1 bills every joined row read.
 const COUNT_FROM = 'messages m LEFT JOIN contacts c ON c.number=m.peer_number';
-const columns = 'm.id,m.direction,m.system_number,m.peer_number,m.body,m.occurred_at,m.received_at,m.time_source,m.submission_status,m.provider_message_id,m.updated_at,m.sent_by,m.import_id,c.data AS contact,COALESCE(s.is_test,0) AS is_test';
+const columns = 'm.id,m.direction,m.system_number,m.peer_number,m.body,m.occurred_at,m.received_at,m.time_source,m.submission_status,m.provider_message_id,m.updated_at,m.sent_by,m.import_id,m.clicks,m.auto_clicks,m.clicked_at,c.data AS contact,COALESCE(s.is_test,0) AS is_test';
 // Whitelisted sort expressions. Incoming rows have no status or sender, so they sort as ''.
-const sorts: Record<string,string> = {time:'m.occurred_at',received:'m.received_at',direction:'m.direction',peer:'m.peer_number',number:'m.system_number',status:"COALESCE(m.submission_status,'')",sent_by:"COALESCE(m.sent_by,'')"};
-const numeric = new Set(['time','received']);
+const sorts: Record<string,string> = {time:'m.occurred_at',received:'m.received_at',direction:'m.direction',peer:'m.peer_number',number:'m.system_number',status:"COALESCE(m.submission_status,'')",sent_by:"COALESCE(m.sent_by,'')",clicks:'COALESCE(m.clicks+1,0)'};
+// Clicks sort as count+1 so messages without tracked links (0) come below unclicked ones and cursors stay non-negative.
+const numeric = new Set(['time','received','clicks']);
+// Tracked-link filter: clicked by a person, opened only automatically (previews, scanners), or not opened. Messages
+// without tracked links (clicks NULL) match none of them.
+const CLICKS: Record<string,string> = {clicked:'m.clicks>0',auto:'m.clicks=0 AND m.auto_clicks>0',none:'m.clicks=0 AND m.auto_clicks=0'};
 // Contact field IDs are validated in settings (lowercase letters, digits, underscores), so they are safe inside a JSON path.
 const contactExpr = (id: string) => `COALESCE(json_extract(c.data,'$.${id}'),'')`;
 function choice<T extends string>(p: URLSearchParams, name: string, allowed: readonly T[]): T | undefined { const value=p.get(name); if (value===null) return undefined; if (!allowed.includes(value as T)) throw new HttpError(400,'Invalid '+name); return value as T; }
@@ -33,6 +37,7 @@ async function filters(p: URLSearchParams, env: Env, user: User, fields: Contact
  for(const [param,op] of [['from','>='],['to','<']] as const) if(p.has(param)) { const raw=p.get(param)!; if(!/^\d+$/.test(raw)||!Number.isSafeInteger(Number(raw))) throw new HttpError(400,'Invalid date filter'); conditions.push('m.occurred_at '+op+' ?');bindings.push(Number(raw)); }
  const directions=list(p,'direction',['in','out']); if (directions.length===1) { conditions.push('m.direction=?');bindings.push(directions[0]); }
  const statuses=list(p,'status',['pending','accepted','rejected','unknown']); if (statuses.length) { conditions.push('m.submission_status IN (SELECT value FROM json_each(?))');bindings.push(JSON.stringify(statuses)); }
+ const clicks=list(p,'clicks',['clicked','auto','none']); if (clicks.length) conditions.push('('+clicks.map(c=>CLICKS[c]).join(' OR ')+')');
  const peer=contains(p,'peer_q'); if (peer) { conditions.push('instr(m.peer_number,?)>0');bindings.push(phoneNeedle(peer)); }
  const body=contains(p,'body_q'); if (body) { conditions.push('instr(lower(m.body),lower(?))>0');bindings.push(body); }
  const by=contains(p,'by_q'); if (by) { conditions.push("instr(lower(COALESCE(m.sent_by,'')),lower(?))>0");bindings.push(by); }

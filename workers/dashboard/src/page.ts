@@ -1,4 +1,5 @@
 import {header,shell,svg} from './ui';
+import {LINKS_JS} from '../../../shared/links';
 export {adminPage} from './admin-page';
 export {noAccessPage,sessionEndedPage} from './ui';
 const css = String.raw`
@@ -128,6 +129,7 @@ const body = header('messages',true) + String.raw`
  <div class="fld"><div class="row"><label class="label" for="c-body">הודעה</label><button type="button" class="ghost end" id="c-vars" aria-haspopup="dialog">{ } הוספת משתנה</button></div><textarea id="c-body" rows="5" maxlength="1000"></textarea>
   <p class="hint" id="c-vars-hint" hidden></p>
   <div class="row"><span class="hint" id="c-count"></span><span class="hint end" id="c-usage"></span></div><p class="hint" id="c-optout" hidden></p></div>
+ <div class="fld" id="c-track-row" hidden><label class="check"><input type="checkbox" id="c-track">`+svg('link')+String.raw`קיצור ומעקב קישורים</label><p class="hint" id="c-track-hint"></p></div>
  <div class="fld"><span class="label">הודעת בדיקה</span><div class="row"><input id="c-test" class="field phone" dir="ltr" maxlength="20" placeholder="מספר לבדיקה" aria-label="מספר לבדיקה"><button type="button" class="ghost" id="c-test-send">`+svg('flask')+String.raw`שליחת בדיקה</button><label class="check hint"><input type="checkbox" id="c-test-save">שמירה כמספר הבדיקה שלי</label></div></div>
  <div class="fld"><label class="check"><input type="checkbox" id="c-later">שליחה מתוזמנת</label><div class="row" id="c-later-row" hidden><input type="date" id="c-later-date" class="field" aria-label="תאריך שליחה"><input type="time" id="c-later-time" class="field" aria-label="שעת שליחה"><span class="hint">לפי שעון ישראל. אפשר לשנות או לבטל עד מועד השליחה.</span></div></div>
  <div class="banner" id="c-error" role="alert" hidden></div>
@@ -177,13 +179,16 @@ const body = header('messages',true) + String.raw`
 </div></dialog>
 `;
 const script = String.raw`
+// Tracked links (shared/links.ts): clicked by a person, opened only automatically (link previews, scanners), or not opened.
+const CLICKS={clicked:'נלחץ',auto:'נפתח אוטומטית בלבד',none:'לא נפתח'};
+function clickState(m){return m.clicks==null?null:m.clicks>0?'clicked':m.auto_clicks>0?'auto':'none';}
 const STATUS={pending:['בתהליך','warn','clock','ההגשה בתהליך'],accepted:['התקבלה','good','check','ההגשה התקבלה אצל הספק. זה אינו אישור מסירה'],rejected:['נדחתה','bad','x','ההגשה נדחתה'],unknown:['לא ידוע','neutral','question','תוצאת ההגשה לא ידועה']};
 const DIR={in:'נכנסת',out:'יוצאת'};
 const RANGES=[['','הכל'],['1h','שעה אחרונה'],['24h','24 שעות'],['today','היום'],['7','7 ימים'],['30','30 ימים'],['custom','טווח']];
 const DATE=/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,TIME=/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/;
 const state={q:'',peer:'',sort:'time',order:'desc'};
 // Column filters: a date range with optional times or a number of recent hours, value sets (direction, status, system number) and "contains" text keyed by query parameter.
-const F={range:'',hours:0,from:'',to:'',fromTime:'',toTime:'',dir:[],status:[],num:[],text:{}};
+const F={range:'',hours:0,from:'',to:'',fromTime:'',toTime:'',dir:[],status:[],num:[],clicks:[],text:{}};
 let COLS=[],visible=[];
 const rows=new Map(),cache=new Map(),fresh=new Set(),expanded=new Set(),labels=new Map();
 let next=null,sync=null,boundary=null,maxId=null,total=null,S=null,statsAt=0,statsStale=false,gen=0,loading=false,polling=false,paging=false,stopped=false,fails=0,unseen=0,timer=0,debounce=0,saveTimer=0,noNumbers=false;
@@ -195,6 +200,7 @@ function buildColumns(){COLS=[{id:'time',label:'זמן',sort:'time',filter:'date
  COLS.push({id:'number',label:'מספר מערכת',sort:'number',filter:'set',key:'num',options:ME.numbers.map(function(n){return [n.number,n.label];}),cls:'c-num',w:160},
   {id:'body',label:'הודעה',filter:'text',param:'body_q',cls:'c-msg',w:0},
   {id:'status',label:'סטטוס הגשה',sort:'status',filter:'set',key:'status',options:Object.keys(STATUS).map(function(k){return [k,STATUS[k][0]];}),cls:'c-status',w:124},
+  {id:'clicks',label:'לחיצות',sort:'clicks',filter:'set',key:'clicks',options:Object.keys(CLICKS).map(function(k){return [k,CLICKS[k]];}),cls:'c-extra',w:130},
   {id:'sent_by',label:'נשלחה על ידי',sort:'sent_by',filter:'text',param:'by_q',cls:'c-extra',w:190},
   {id:'received',label:'נקלטה',sort:'received',cls:'c-extra',w:150});
  const saved=Array.isArray(ME.columns)?ME.columns.filter(function(id){return COLS.some(function(c){return c.id===id;});}):[];visible=order(saved.length?saved:defaultColumns());}
@@ -208,11 +214,11 @@ function readUrl(){const p=new URLSearchParams(location.search);state.q=(p.get('
  const s=p.get('sort');state.sort=COLS.some(function(c){return c.sort&&c.sort===s;})?s:'time';const o=p.get('order');state.order=o==='asc'||o==='desc'?o:'desc';
  F.range=RANGES.some(function(r){return r[0]&&r[0]===p.get('range');})?p.get('range'):'';const h=Number(p.get('hours'));if(p.get('range')==='hours'&&validHours(h)){F.range='hours';F.hours=h;}F.from=DATE.test(p.get('from')||'')?p.get('from'):'';F.to=DATE.test(p.get('to')||'')?p.get('to'):'';
  F.fromTime=TIME.test(p.get('from_t')||'')?p.get('from_t'):'';F.toTime=TIME.test(p.get('to_t')||'')?p.get('to_t'):'';
- F.dir=pick(p.get('dir'),['in','out']);F.status=pick(p.get('status'),Object.keys(STATUS));F.num=pick(p.get('num'),ME.numbers.map(function(n){return n.number;}));
+ F.dir=pick(p.get('dir'),['in','out']);F.status=pick(p.get('status'),Object.keys(STATUS));F.num=pick(p.get('num'),ME.numbers.map(function(n){return n.number;}));F.clicks=pick(p.get('clicks'),Object.keys(CLICKS));
  F.text={};for(const k of textParams()){const v=p.get(k);if(v)F.text[k]=v.slice(0,200);}}
 function writeUrl(){const p=new URLSearchParams();if(state.q)p.set('q',state.q);if(state.peer)p.set('peer',state.peer);if(state.sort!=='time'||state.order!=='desc'){p.set('sort',state.sort);p.set('order',state.order);}
  if(F.range){p.set('range',F.range);if(F.range==='hours')p.set('hours',String(F.hours));if(F.range==='custom'){if(F.from)p.set('from',F.from);if(F.fromTime)p.set('from_t',F.fromTime);if(F.to)p.set('to',F.to);if(F.toTime)p.set('to_t',F.toTime);}}
- if(F.dir.length)p.set('dir',F.dir.join(','));if(F.status.length)p.set('status',F.status.join(','));if(F.num.length)p.set('num',F.num.join(','));for(const k in F.text)p.set(k,F.text[k]);
+ if(F.dir.length)p.set('dir',F.dir.join(','));if(F.status.length)p.set('status',F.status.join(','));if(F.num.length)p.set('num',F.num.join(','));if(F.clicks.length)p.set('clicks',F.clicks.join(','));for(const k in F.text)p.set(k,F.text[k]);
  const s=p.toString();history.replaceState(null,'',s?'?'+s:location.pathname);}
 function active(c){if(!c.filter)return false;if(c.filter==='date')return !!F.range;if(c.filter==='set')return F[c.key].length>0;return !!F.text[c.param];}
 // Recent hours typed by the user: a whole number up to 30 days.
@@ -224,7 +230,7 @@ function filtered(){return !!(state.q||state.peer)||COLS.some(active);}
 function bounds(){const t=today();if(F.range==='1h'||F.range==='24h'||F.range==='hours')return [Date.now()-(F.range==='1h'?1:F.range==='24h'?24:F.hours)*3600000];if(F.range==='today')return [midnight(t)];if(F.range==='7'||F.range==='30')return [midnight(shift(t,1-Number(F.range)))];
  if(F.range==='custom'){const from=F.from||(F.fromTime?t:''),to=F.to||(F.toTime?t:'');return [from?israelTime(from,F.fromTime):undefined,to?(F.toTime?israelTime(to,F.toTime)+60000:midnight(shift(to,1))):undefined];}return [];}
 function query(withStatus){const p=new URLSearchParams();if(F.num.length)p.set('system_number',F.num.join(','));if(state.peer)p.set('peer_number',state.peer);if(state.q)p.set('q',state.q);
- if(F.dir.length)p.set('direction',F.dir.join(','));if(F.status.length&&withStatus)p.set('status',F.status.join(','));for(const k in F.text)p.set(k,F.text[k]);
+ if(F.dir.length)p.set('direction',F.dir.join(','));if(F.status.length&&withStatus)p.set('status',F.status.join(','));if(F.clicks.length&&withStatus)p.set('clicks',F.clicks.join(','));for(const k in F.text)p.set(k,F.text[k]);
  const b=bounds();if(b[0]!==undefined)p.set('from',String(b[0]));if(b[1]!==undefined)p.set('to',String(b[1]));p.set('sort',state.sort);p.set('order',state.order);p.set('limit','100');return p;}
 
 function live(kind,text){$('live').className='live '+kind;$('live-text').textContent=text;}
@@ -242,7 +248,7 @@ function title(){document.title=(unseen?'('+unseen+') ':'')+'הודעות SMS';}
 async function stats(g){try{const s=await get('/api/stats?'+query(true));if(g!==gen)return;S=s;maxId=s.max_id;statsAt=Date.now();statsStale=false;showStats();}
  catch(e){if(g===gen)for(const id of ['s-total','s-in','s-out','s-peers'])$(id).textContent='—';}}
 function showStats(){total=S.total;$('s-total').textContent=nf.format(S.total);$('s-in').textContent=nf.format(S.incoming);$('s-out').textContent=nf.format(S.outgoing);$('s-peers').textContent=nf.format(S.peers);count();}
-function bump(m){maxId=Math.max(maxId,m.id);statsStale=true;if(S&&(!F.status.length||F.status.includes(m.submission_status))){S.total++;S[m.direction==='in'?'incoming':'outgoing']++;}}
+function bump(m){maxId=Math.max(maxId,m.id);statsStale=true;if(S&&(!F.status.length||F.status.includes(m.submission_status))&&(!F.clicks.length||F.clicks.includes(clickState(m)))){S.total++;S[m.direction==='in'?'incoming':'outgoing']++;}}
 async function load(){const g=++gen;loading=true;total=null;maxId=null;busy(true);writeUrl();renderHead();renderChips();render();
  try{const d=(await Promise.all([get('/api/messages?'+query(true)),stats(g)]))[0];if(g!==gen)return;
   rows.clear();cache.clear();$('rows').replaceChildren();fresh.clear();expanded.clear();for(const m of d.messages)rows.set(m.id,m);
@@ -250,12 +256,12 @@ async function load(){const g=++gen;loading=true;total=null;maxId=null;busy(true
  catch(e){if(g===gen){rows.clear();next=null;sync=null;fail(e,true);}}
  finally{if(g===gen){loading=false;busy(false);render();}}}
 // Live updates fetch rows changed since the last sync. Rows past the last loaded page are left for "load more",
-// and the status filter is applied here because a status change can move a row out of the filter.
+// and the status and clicks filters are applied here because a status change or a click can move a row out of them.
 async function poll(){if(loading||polling)return;polling=true;const g=gen;
  try{let changed=false,grew=false;
   for(let i=0;i<20;i++){const p=query(false);p.set('since',sync);const d=await get('/api/messages?'+p);if(g!==gen)return;
    for(const m of d.messages){const had=rows.has(m.id);if(maxId!==null&&m.id>maxId){grew=true;bump(m);if(document.hidden&&m.direction==='in')unseen++;}
-    if((F.status.length&&!F.status.includes(m.submission_status))||(boundary&&cmp(m,boundary)>0)){if(had){rows.delete(m.id);changed=true;}continue;}
+    if((F.status.length&&!F.status.includes(m.submission_status))||(F.clicks.length&&!F.clicks.includes(clickState(m)))||(boundary&&cmp(m,boundary)>0)){if(had){rows.delete(m.id);changed=true;}continue;}
     rows.set(m.id,m);fresh.add(m.id);changed=true;}
    sync=d.sync_cursor;if(!d.has_more)break;}
   ok();if(grew&&S)showStats();if(changed)render();if((statsStale&&Date.now()-statsAt>600000)||(changed&&maxId===null))await stats(g);title();}
@@ -270,7 +276,7 @@ async function tick(){if(stopped)return;if(!sync){if(!loading)await load();}else
 function schedule(){clearTimeout(timer);if(stopped)return;timer=setTimeout(function(){tick().finally(schedule);},document.hidden?30000:(ME?ME.settings.refresh_seconds:5)*1000);}
 
 // Must match the server's sort expressions so live updates land in the same place.
-function key(m){switch(state.sort){case 'time':return m.occurred_at;case 'received':return m.received_at;case 'direction':return m.direction;case 'peer':return m.peer_number;case 'number':return m.system_number;case 'status':return m.submission_status||'';case 'sent_by':return m.sent_by||'';default:return String((m.contact&&m.contact[state.sort.slice(2)])||'');}}
+function key(m){switch(state.sort){case 'time':return m.occurred_at;case 'received':return m.received_at;case 'direction':return m.direction;case 'peer':return m.peer_number;case 'number':return m.system_number;case 'status':return m.submission_status||'';case 'sent_by':return m.sent_by||'';case 'clicks':return m.clicks==null?0:m.clicks+1;default:return String((m.contact&&m.contact[state.sort.slice(2)])||'');}}
 function cmp(a,b){const x=key(a),y=key(b);const c=x<y?-1:x>y?1:a.id-b.id;return state.order==='asc'?c:-c;}
 function renderHead(){const cols=$('cols'),head=$('head');cols.replaceChildren();head.replaceChildren();let width=0;
  for(const id of visible){const c=col(id);const ce=el('col');if(c.w)ce.style.width=c.w+'px';cols.append(ce);width+=c.w||280;
@@ -297,7 +303,7 @@ function build(m,open,now){const tr=el('tr',m.direction+(open?' open':''));tr.ta
  for(const id of visible)tr.append(cell(col(id),m,now));
  if(open){const det=el('div','details');det.append(fact('נקלטה',fullFmt.format(m.received_at)));if(m.time_source==='receipt')det.append(fact('זמן ההודעה','לפי זמן הקליטה'));
   for(const f of ME.contact_fields)if(m.contact&&m.contact[f.id])det.append(fact(f.label,m.contact[f.id]));
-  if(m.sent_by)det.append(fact('נשלחה על ידי',m.sent_by));if(m.import_id)det.append(fact('מקור','ייבוא מקובץ'));const bi=botInfo.get(m.id);
+  if(m.sent_by)det.append(fact('נשלחה על ידי',m.sent_by));const ck=clickState(m);if(ck)det.append(fact('קישורים',(ck==='clicked'?(m.clicks===1?'לחיצה אחת':nf.format(m.clicks)+' לחיצות')+' · ראשונה '+fullFmt.format(m.clicked_at):CLICKS[ck])+(m.auto_clicks?' · '+(m.auto_clicks===1?'פתיחה אוטומטית אחת':nf.format(m.auto_clicks)+' פתיחות אוטומטיות'):'')));if(m.import_id)det.append(fact('מקור','ייבוא מקובץ'));const bi=botInfo.get(m.id);
   if(bi&&bi.answer)det.append(fact('תשובה לבוט',(bi.answer.meaning||bi.answer.answer)+' · '+bi.answer.flow));if(bi&&bi.conversation)det.append(fact('בוט','בשיחה בתהליך '+bi.conversation.flow));if(bi&&bi.blocked)det.append(fact('בוט','מושבת ללקוח הזה'));if(m.provider_message_id)det.append(fact('מזהה ספק',m.provider_message_id));
   const acts=el('div','actions');if(canSend(m.system_number))acts.append(act('reply','השב'));if(ME.can_edit_contacts&&ME.contact_fields.length)acts.append(act('edit','עריכת פרטים'));if(bi&&canSend(m.system_number))acts.append(bi.blocked?act('bot-on','הפעלת הבוט'):act('bot-off','השבתת הבוט'));acts.append(act('copy','העתקת הטקסט'),act('chat','כל השיחה'));det.append(acts);
   (tr.querySelector('.c-msg')||tr.lastChild).append(det);}
@@ -310,6 +316,8 @@ function cell(c,m,now){const td=el('td',c.cls);td.dataset.label=c.label;
  else if(c.id==='number'){const label=labels.get(m.system_number);td.append(el('span',label?'num-label':'num-label phone',label||local(m.system_number)));if(label)td.append(el('span','num-sub phone',local(m.system_number)));}
  else if(c.id==='body')td.append(el('div','body',m.body));
  else if(c.id==='status'){const s=m.direction==='out'&&STATUS[m.submission_status];if(s){const b=el('span','badge '+s[1]);b.title=s[3];b.append(icon(s[2]),s[0]);td.append(b);}else td.append(el('span','dash','—'));if(m.is_test)td.append(el('span','tag test','בדיקה'));if(m.import_id)td.append(el('span','tag test','יובאה'));}
+ else if(c.id==='clicks'){const k=clickState(m);if(!k)td.append(el('span','dash','—'));else{const b=el('span','badge '+(k==='clicked'?'good':'neutral'));b.append(icon('link'),k==='clicked'?(m.clicks===1?'נלחץ':'נלחץ '+nf.format(m.clicks)+' פעמים'):CLICKS[k]);
+   b.title=k==='clicked'?'לחיצה ראשונה: '+fullFmt.format(m.clicked_at):k==='auto'?'הקישור נפתח רק באופן אוטומטי (תצוגה מקדימה או סורק), כנראה לא על ידי הנמען':'הנמען עדיין לא פתח את הקישור';td.append(b);}}
  else{const v=c.id==='sent_by'?m.sent_by:m.contact&&m.contact[c.field];if(v)td.textContent=v;else td.append(el('span','dash','—'));}
  return td;}
 function fact(label,value){const e=el('span');e.append(el('b','',label),value);return e;}
@@ -342,7 +350,7 @@ function renderChips(){const chips=$('chips');chips.replaceChildren();
  if(state.q)chips.append(chip(['חיפוש: '+state.q],function(){state.q='';$('q').value='';load();}));
  for(const c of COLS)if(active(c))chips.append(chip([chipLabel(c)],function(){clearColumn(c);load();}));
  if(filtered()){const b=el('button','ghost','ניקוי כל הסינונים');b.type='button';b.addEventListener('click',clearAll);chips.append(b);}}
-function clearAll(){state.q='';state.peer='';clearRange();F.dir=[];F.status=[];F.num=[];F.text={};$('q').value='';closeMenu();load();}
+function clearAll(){state.q='';state.peer='';clearRange();F.dir=[];F.status=[];F.num=[];F.clicks=[];F.text={};$('q').value='';closeMenu();load();}
 function openPeer(n){state.peer=n;if(state.sort==='peer'){state.sort='time';state.order='desc';}load();}
 // Bot state for an opened message (the answer it gave, an ongoing conversation, or the bot turned off), loaded on demand.
 const botInfo=new Map();
@@ -408,7 +416,7 @@ function openExport(){renderExportCols();
  $('ex-error').hidden=true;$('ex-bar').hidden=true;$('ex-status').textContent='';$('ex-go').disabled=false;$('export-dlg').showModal();}
 for(const b of document.querySelectorAll('[data-format]'))b.addEventListener('click',function(){exportFormat=b.dataset.format;for(const x of document.querySelectorAll('[data-format]'))x.setAttribute('aria-pressed',String(x===b));});
 function exportValue(c,m){switch(c.id){case 'time':return exportFmt.format(m.occurred_at);case 'received':return exportFmt.format(m.received_at);case 'direction':return DIR[m.direction];case 'peer':return local(m.peer_number);
- case 'number':return (labels.get(m.system_number)?labels.get(m.system_number)+' ':'')+local(m.system_number);case 'body':return m.body;case 'status':return (m.direction==='out'&&STATUS[m.submission_status]?STATUS[m.submission_status][0]:'')+(m.is_test?' (בדיקה)':'');case 'sent_by':return m.sent_by||'';default:return (m.contact&&m.contact[c.field])||'';}}
+ case 'number':return (labels.get(m.system_number)?labels.get(m.system_number)+' ':'')+local(m.system_number);case 'body':return m.body;case 'status':return (m.direction==='out'&&STATUS[m.submission_status]?STATUS[m.submission_status][0]:'')+(m.is_test?' (בדיקה)':'');case 'sent_by':return m.sent_by||'';case 'clicks':{const k=clickState(m);return !k?'':k==='clicked'?(m.clicks===1?'נלחץ':'נלחץ '+m.clicks+' פעמים')+' ('+exportFmt.format(m.clicked_at)+')':CLICKS[k];}default:return (m.contact&&m.contact[c.field])||'';}}
 // CSV cells that start like a formula are prefixed with ' so spreadsheet apps show them as text.
 function csvCell(v,safe){let s=String(v==null?'':v);if(!safe&&/^[=+\-@\t\r]/.test(s))s="'"+s;return /[",\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
 function csvBlob(defs,head,data){const safe=defs.map(function(c){return ['time','received','peer','number','last_at','last_number','total','incoming','outgoing'].includes(c.id);});const lines=[head].concat(data).map(function(r){return r.map(function(v,i){return csvCell(v,safe[i]);}).join(',');});return new Blob([String.fromCharCode(0xfeff)+lines.join('\r\n')],{type:'text/csv;charset=utf-8'});}
@@ -439,7 +447,7 @@ $('ex-form').addEventListener('submit',async function(e){e.preventDefault();if(e
   for(;;){const p=new URLSearchParams(base);if(cursor)p.set('cursor',cursor);const d=await get('/api/messages?'+p);for(const m of d.messages)found.push(m);cursor=d.next_cursor;
    $('ex-status').textContent='נטענו '+nf.format(found.length)+' הודעות';$('ex-progress').style.width=(total?Math.min(100,found.length/Math.min(total,50000)*100):50)+'%';if(!cursor||found.length>=50000)break;}
   const head=defs.map(function(c){return c.label;});const data=found.slice(0,50000).map(function(m){return defs.map(function(c){return exportValue(c,m);});});$('ex-status').textContent='יוצר קובץ…';
-  download(exportFormat==='csv'?csvBlob(defs,head,data):await xlsxBlob(head,data,defs.map(function(c){return {body:60,direction:9,status:14,sent_by:28,number:24,peer:15,time:20,received:20}[c.id]||18;})),'sms-'+today()+'.'+exportFormat);$('export-dlg').close();toast('יוצאו '+nf.format(data.length)+' הודעות');}
+  download(exportFormat==='csv'?csvBlob(defs,head,data):await xlsxBlob(head,data,defs.map(function(c){return {body:60,direction:9,status:14,clicks:28,sent_by:28,number:24,peer:15,time:20,received:20}[c.id]||18;})),'sms-'+today()+'.'+exportFormat);$('export-dlg').close();toast('יוצאו '+nf.format(data.length)+' הודעות');}
  catch(err){$('ex-error').hidden=false;$('ex-error').textContent=message(err);}
  finally{exporting=false;$('ex-go').disabled=false;}});
 function peerValue(c,r){switch(c.id){case 'peer':return local(r.peer_number);case 'total':return String(r.total);case 'incoming':return String(r.incoming);case 'outgoing':return String(r.outgoing);case 'last_at':return exportFmt.format(r.last_at);
@@ -524,7 +532,7 @@ function openCompose(from,to){const list=senders();if(!list.length)return;const 
  const soon=Date.now()+3600000;$('c-later').checked=false;$('c-later-row').hidden=true;$('c-later-date').value=ymd(soon);const z=zoned(soon);$('c-later-time').value=pad(z.hour)+':00';
  $('c-to').value=to?local(to):'';$('c-body').value='';$('c-import').hidden=true;$('c-error').hidden=true;$('c-file-btn').hidden=$('c-save-list').hidden=!ME.can_bulk_send;
  $('c-test').value=ME.test_number?local(ME.test_number):'';$('c-test-save').checked=false;renderComposeLists();if(ME.can_bulk_send&&LISTS===null)loadLists();
- $('c-body').readOnly=false;$('c-stop-bot').checked=false;renderComposeFlows();updateCompose();$('compose').showModal();(to?$('c-body'):$('c-to')).focus();}
+ $('c-body').readOnly=false;$('c-stop-bot').checked=false;$('c-track').checked=false;renderComposeFlows();updateCompose();$('compose').showModal();(to?$('c-body'):$('c-to')).focus();}
 // Bot flows of the chosen number. Choosing one makes its first step the message and starts the flow for the recipients.
 function composeFlows(){return (ME.flows||[]).filter(function(f){return f.system_number===$('c-from').value;});}
 function renderComposeFlows(){const list=composeFlows();const sel=$('c-flow');const was=sel.value;sel.replaceChildren();const none=el('option','','בלי תהליך');none.value='';sel.append(none);
@@ -543,8 +551,15 @@ function recipients(){const typed=$('c-to').value.split(/[;\n]+/).map(function(s
  return {list:Array.from(valid),invalid:invalid,duplicates:found-valid.size};}
 // Micropay bills 70 characters for a single Hebrew SMS and 67 per part after that (140 and 134 in English).
 function segments(text){const len=text.replace(/\n/g,'\r\n').length;if(!len)return 0;const uni=/[^\x00-\x7f]/.test(text);return len<=(uni?70:140)?1:Math.ceil(len/(uni?67:134));}
-function finalBody(n){let b=$('c-body').value;const t=ME.settings.optout_text;if(n>1&&t&&b.indexOf(t)<0)b+='\n'+t;return b;}
-function updateCompose(){const r=recipients();const n=r.list.length;const body=finalBody(n);const seg=segments(body);
+function finalBody(n){let b=$('c-body').value;if(tracking())b=sampleLinks(b);const t=ME.settings.optout_text;if(n>1&&t&&b.indexOf(t)<0)b+='\n'+t;return b;}
+// Link tracking (shared/links.ts): each link becomes a short link of its own for every recipient. Lengths are counted
+// with a sample code, which is as long as the real ones.
+function tracking(){return !!ME.settings.link_base&&!$('c-track-row').hidden&&$('c-track').checked;}
+function sampleLinks(b){let out='',at=0;for(const f of findLinks(b)){if(f.url.toLowerCase().indexOf(ME.settings.link_base+'/')===0)continue;out+=b.slice(at,f.start)+ME.settings.link_base+'/Ab3xY9k';at=f.end;}return out+b.slice(at);}
+function updateCompose(){const r=recipients();const n=r.list.length;const links=ME.settings.link_base?findLinks($('c-body').value).length:0;$('c-track-row').hidden=!links;
+ const body=finalBody(n);const seg=segments(body);
+ $('c-track-hint').textContent=!tracking()?(links===1?'הקישור בהודעה יישלח כמו שהוא.':'הקישורים בהודעה יישלחו כמו שהם.')+' סימון האפשרות מחליף כל קישור בקישור מקוצר אישי לכל נמען, וכך אפשר לראות בטבלה מי לחץ.':
+  (links===1?'הקישור יוחלף':'כל אחד מ-'+links+' הקישורים יוחלף')+' בקישור אישי לכל נמען, למשל '+ME.settings.link_base+'/Ab3xY9k. הלחיצות יופיעו בעמודה "לחיצות".'+(n>PERSONAL_BATCH&&!ME.settings.micropay_listjson?' ההודעה תישלח בקבוצות של '+PERSONAL_BATCH+' נמענים.':'');
  $('c-summary').textContent=n?nf.format(n)+(n===1?' נמען':' נמענים')+(r.duplicates?' · '+(r.duplicates===1?'כפילות אחת הוסרה':nf.format(r.duplicates)+' כפילויות הוסרו'):''):'עדיין לא הוזנו נמענים';
  $('c-invalid').hidden=!r.invalid.length;$('c-invalid-text').textContent=r.invalid.length?(r.invalid.length===1?'מספר לא תקין שלא יישלח: ':nf.format(r.invalid.length)+' מספרים לא תקינים שלא יישלחו: ')+r.invalid.slice(0,4).map(function(x){return x.value;}).join(', ')+(r.invalid.length>4?'…':''):'';
  const vars=usedVars($('c-body').value);const personal=vars.length>0;const unknown=vars.filter(function(v){return varNames().indexOf(v)<0;});
@@ -577,6 +592,7 @@ $('c-import-clear').addEventListener('click',function(){C.rows=null;C.imported=[
 $('c-save-list').addEventListener('click',function(){const r=recipients();if(!r.list.length){composeError('אין נמענים לשמירה');return;}$('compose').close();editList(null,r.list);});
 for(const id of ['c-to','c-body'])$(id).addEventListener('input',edited);
 $('c-from').addEventListener('change',function(){renderComposeFlows();edited();});
+$('c-track').addEventListener('change',edited);
 $('c-later').addEventListener('change',function(){$('c-later-row').hidden=!this.checked;edited();});
 for(const id of ['c-later-date','c-later-time'])$(id).addEventListener('change',edited);
 $('c-flow').addEventListener('change',function(){applyComposeFlow();edited();});
@@ -585,24 +601,24 @@ for(const id of ['c-close','c-cancel'])$(id).addEventListener('click',function()
 $('c-test-send').addEventListener('click',async function(){const n=normalize($('c-test').value);$('c-error').hidden=true;if(!n){composeError('מספר הבדיקה אינו תקין');return;}if(!$('c-body').value.trim()){composeError('יש לכתוב הודעה לפני שליחת בדיקה');return;}
  const b=this;b.disabled=true;
  try{if($('c-test-save').checked&&n!==ME.test_number){await post('/api/me/prefs',{test_number:n});ME.test_number=n;$('c-test-save').checked=false;}
-  const d=await post('/api/send',{id:crypto.randomUUID(),test:true,bulk_preview:recipients().list.length>1,system_number:$('c-from').value,recipients:[n],body:$('c-body').value});
+  const d=await post('/api/send',{id:crypto.randomUUID(),test:true,bulk_preview:recipients().list.length>1,system_number:$('c-from').value,recipients:[n],body:$('c-body').value,track_links:tracking()});
   if(d.status==='rejected')composeError('הספק דחה את הודעת הבדיקה'+(d.error?': '+d.error:''));else toast(d.status==='accepted'?'הודעת הבדיקה נשלחה ל-'+local(n):'הודעת הבדיקה הועברה לספק, התוצאה לא ידועה');
   loadMe().then(updateCompose).catch(function(){});tick();}
  catch(err){composeError(message(err));}finally{b.disabled=false;}});
 $('c-form').addEventListener('submit',async function(e){e.preventDefault();if(C.sending)return;const r=recipients();if(!r.list.length||$('c-send').disabled)return;
  if(!C.confirm){C.confirm=true;updateCompose();return;}
  C.sending=true;$('c-send').disabled=true;$('c-send-text').textContent='שולח…';$('c-error').hidden=true;
- // Personalized messages go in batches of 40, each with its own send ID kept across retries, so retrying after a
+ // Personalized and tracked messages go in batches of 40, each with its own send ID kept across retries, so retrying after a
  // failure sends only the batches that did not go out. Other messages go in one request, as before.
  const body=$('c-body').value;const flow=$('c-flow-row').hidden?'':$('c-flow').value;const stop=!flow&&!$('c-flow-row').hidden&&$('c-stop-bot').checked;
- const personal=usedVars(flow?((ME.flows||[]).find(function(f){return String(f.id)===flow;})||{first:''}).first:body).length>0;const at=laterAt();
- if(at){try{const d=await post('/api/send',{id:C.id,system_number:$('c-from').value,recipients:r.list,body:body,flow_id:flow?Number(flow):null,stop_bot:stop,send_at:at});
+ const personal=usedVars(flow?((ME.flows||[]).find(function(f){return String(f.id)===flow;})||{first:''}).first:body).length>0;const at=laterAt();const track=tracking();
+ if(at){try{const d=await post('/api/send',{id:C.id,system_number:$('c-from').value,recipients:r.list,body:body,flow_id:flow?Number(flow):null,stop_bot:stop,track_links:track,send_at:at});
    $('compose').close();toast(d.duplicate?'השליחה הזו כבר תוזמנה':'השליחה תוזמנה ל-'+shortFmt.format(d.send_at)+' · '+plural(d.recipients,'נמען אחד','נמענים'));}
   catch(err){composeError(message(err));}finally{C.sending=false;C.confirm=false;updateCompose();}return;}
- if(!C.batches){const size=personal&&!ME.settings.micropay_listjson?PERSONAL_BATCH:r.list.length;C.batches=[];for(let i=0;i<r.list.length;i+=size)C.batches.push({id:C.batches.length?crypto.randomUUID():C.id,list:r.list.slice(i,i+size),done:false});}
+ if(!C.batches){const size=(personal||track)&&!ME.settings.micropay_listjson?PERSONAL_BATCH:r.list.length;C.batches=[];for(let i=0;i<r.list.length;i+=size)C.batches.push({id:C.batches.length?crypto.randomUUID():C.id,list:r.list.slice(i,i+size),done:false});}
  const total={sent:0,accepted:0,rejected:0,unknown:0,opted:0,duplicate:false};
  try{for(let i=0;i<C.batches.length;i++){const b=C.batches[i];if(b.done)continue;if(C.batches.length>1)$('c-send-text').textContent='שולח '+nf.format(i+1)+' מתוך '+nf.format(C.batches.length)+'…';
-   const d=await post('/api/send',{id:b.id,system_number:$('c-from').value,recipients:b.list,body:body,flow_id:flow?Number(flow):null,stop_bot:stop,bulk:r.list.length>1});
+   const d=await post('/api/send',{id:b.id,system_number:$('c-from').value,recipients:b.list,body:body,flow_id:flow?Number(flow):null,stop_bot:stop,track_links:track,bulk:r.list.length>1});
    if(d.status==='rejected'&&!d.duplicate){b.id=crypto.randomUUID();if(i===0)C.id=b.id;throw new Error('הספק דחה את השליחה'+(d.error?': '+d.error:'')+(total.sent?' ('+nf.format(total.sent)+' נמענים כבר קיבלו את ההודעה; שליחה חוזרת תמשיך מהמקום שנעצר)':''));}
    b.done=true;total.sent+=d.sent;total.duplicate=total.duplicate||!!d.duplicate;if(d.skipped)total.opted+=d.skipped.opted_out||0;
    if(d.counts){total.accepted+=d.counts.accepted;total.rejected+=d.counts.rejected;total.unknown+=d.counts.unknown;}else total[d.status==='accepted'?'accepted':'unknown']+=d.sent;}
@@ -617,7 +633,7 @@ $('new').addEventListener('click',function(){openCompose();});
 const SCH_STATUS={scheduled:'ממתינה',sent:'נשלחה',failed:'נכשלה',cancelled:'בוטלה'};
 async function openScheduled(){let d;try{d=await get('/api/scheduled');}catch(e){toast(message(e));return;}const body=$('sch-rows');body.replaceChildren();
  for(const s of d.scheduled){const tr=el('tr');const when=el('td');when.append(el('span','',shortFmt.format(s.send_at)));if(ME.role==='admin'&&s.email!==ME.email)when.append(el('span','sub-line',s.email));
-  const msg=el('td');msg.append(el('div','sch-body',(s.flow?'[בוט: '+s.flow+'] ':'')+s.body));msg.title=s.body;
+  const msg=el('td');msg.append(el('div','sch-body',(s.flow?'[בוט: '+s.flow+'] ':'')+s.body));msg.title=s.body;if(s.track_links)msg.append(el('span','tag','מעקב קישורים'));
   const st=el('td');const r=s.result;let label=SCH_STATUS[s.status];if(s.status==='scheduled'&&s.progress)label='בשליחה '+nf.format(s.progress)+'/'+nf.format(s.recipients);st.append(el('span','tag'+(s.status==='failed'?' off':s.status==='sent'?' accent':''),label));
   if(r)st.append(el('span','sub-line',(r.accepted?nf.format(r.accepted)+' נשלחו':'')+(r.unknown?' · '+nf.format(r.unknown)+' לא ידוע':'')+(r.rejected?' · '+nf.format(r.rejected)+' נדחו':'')+(r.opted_out?' · '+nf.format(r.opted_out)+' בהסרה':'')+(r.error?' · '+r.error:'')));
   const act=el('td');if(s.status==='scheduled'&&!s.progress){const move=el('button','ghost','שינוי מועד');move.type='button';move.addEventListener('click',function(){rescheduleRow(act,s);});
@@ -639,4 +655,4 @@ title();
  catch(e){fail(e,true);return;}
  await load();schedule();})();
 `;
-export function page(nonce:string):string { return shell(nonce,'הודעות SMS',css,body,script,'app'); }
+export function page(nonce:string):string { return shell(nonce,'הודעות SMS',css,body,LINKS_JS+script,'app'); }

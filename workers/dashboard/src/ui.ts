@@ -5,7 +5,7 @@ export const ICONS: Record<string,string> = {
  check:'<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.6-4.9"/>',clock:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
  x:'<circle cx="12" cy="12" r="8.5"/><path d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6"/>',question:'<circle cx="12" cy="12" r="8.5"/><path d="M9.8 9.7a2.3 2.3 0 1 1 3.2 2.1c-.6.3-1 .8-1 1.4v.3M12 16.5v.1"/>',
  chat:'<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4z"/>',copy:'<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>',
- reply:'<path d="M10 8L5 12.5 10 17M5.5 12.5H14a5 5 0 0 1 5 5V19"/>',send:'<path d="M4.5 12h11M11 6l6.5 6-6.5 6"/>',plus:'<path d="M12 5v14M5 12h14"/>',
+ reply:'<path d="M10 8L5 12.5 10 17M5.5 12.5H14a5 5 0 0 1 5 5V19"/>',link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',send:'<path d="M4.5 12h11M11 6l6.5 6-6.5 6"/>',plus:'<path d="M12 5v14M5 12h14"/>',
  sort:'<path d="M8 9.5l4-4 4 4M8 14.5l4 4 4-4"/>',asc:'<path d="M12 19V5M7 10l5-5 5 5"/>',desc:'<path d="M12 5v14M7 14l5 5 5-5"/>',close:'<path d="M8 8l8 8M16 8l-8 8"/>',
  search:'<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',file:'<path d="M7 3.5h6.5L18 8v12.5H7z"/><path d="M13 3.5V8h5"/>',
  filter:'<path d="M4.5 6h15l-6 7v5.5l-3-1.5v-4z"/>',columns:'<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M9.5 5v14M14.5 5v14"/>',download:'<path d="M12 4.5v11M7 11l5 5 5-5M5 19.5h14"/>',

@@ -5,14 +5,15 @@ import {micropaySubmission} from './micropay-submission';
 import {audit,sentLast24h} from './records';
 import {Flow,enterMany,loadFlow} from './bot';
 import {hasVariables,render,unknownVariables} from './template';
+import {findLinks,trackLinks} from './links';
 // Sending, shared by the dashboard's send button and by scheduled sends run from the ingest Worker's timer.
 // prepareSend checks who may send what; executeSend sends it and records the result. Opt-outs, the daily limit and
 // contact data for variables are read at execution, so a scheduled send uses them as they are at its send time.
 export type Sender = {email:string;role:'admin'|'user';can_bulk_send:number;daily_limit:number|null};
-export type SendInput = {system_number?:unknown;body?:unknown;recipients?:unknown;flow_id?:unknown;stop_bot?:unknown;test?:unknown;bulk_preview?:unknown;bulk?:unknown};
-export type Prepared = {system:string;message:string;recipients:string[];invalid:number;duplicates:number;flow:Flow|null;stopBot:boolean;test:boolean;bulkPreview:boolean;bulk:boolean;personal:boolean;settings:Settings};
+export type SendInput = {system_number?:unknown;body?:unknown;recipients?:unknown;flow_id?:unknown;stop_bot?:unknown;test?:unknown;bulk_preview?:unknown;bulk?:unknown;track_links?:unknown};
+export type Prepared = {system:string;message:string;recipients:string[];invalid:number;duplicates:number;flow:Flow|null;stopBot:boolean;test:boolean;bulkPreview:boolean;bulk:boolean;personal:boolean;track:boolean;settings:Settings};
 export type Outcome = {status:'accepted'|'rejected'|'unknown';sent:number;counts:{accepted:number;rejected:number;unknown:number};skipped:{invalid:number;duplicates:number;opted_out:number};task_id:string|null;error:string|null;duplicate?:boolean};
-// Without listjson, each distinct personalized text is one Micropay call, and the free plan allows 50 outgoing calls per
+// Without listjson, each distinct personalized text (and every tracked send, whose links differ per recipient) is one Micropay call, and the free plan allows 50 outgoing calls per
 // request; larger personalized sends are split into batches of this many recipients.
 export const PERSONAL_BATCH = 40;
 
@@ -37,7 +38,9 @@ export async function prepareSend(env: Env, sender: Sender, input: SendInput, no
  if (list.recipients.length > settings.max_recipients) throw new HttpError(413,'Too many recipients (the limit is '+settings.max_recipients+')');
  const personal = hasVariables(message);
  if (personal) { const unknown = unknownVariables(message,settings.contact_fields); if (unknown.length) throw new HttpError(400,'Unknown variable: {'+unknown.join('}, {')+'}'); }
- return {system,message,...list,flow,stopBot:input.stop_bot === true && !flow,test,bulkPreview:input.bulk_preview === true,bulk:list.recipients.length > 1 || input.bulk === true,personal,settings};
+ const track = input.track_links === true;
+ if (track && !settings.link_base) throw new HttpError(400,'Link tracking is not set up'); if (track && !findLinks(message).length) throw new HttpError(400,'The message has no links to track');
+ return {system,message,...list,flow,stopBot:input.stop_bot === true && !flow,test,bulkPreview:input.bulk_preview === true,bulk:list.recipients.length > 1 || input.bulk === true,personal,track,settings};
 }
 
 // Sends to the given recipients (all of p.recipients, or one batch of them). The ID is claimed in sends before
@@ -49,19 +52,37 @@ export async function executeSend(env: Env, fetcher: Fetch, token: string, id: s
  const blocked = new Set((await env.DB.prepare('SELECT number FROM opt_outs WHERE number IN (SELECT value FROM json_each(?))').bind(JSON.stringify(recipients)).all<{number:string}>()).results.map(r => r.number));
  const to = recipients.filter(n => !blocked.has(n)); if (!to.length) throw new HttpError(400,'No valid recipients left to send to');
  if (!admin) { const limit = sender.daily_limit ?? settings.default_daily_limit; const used = await sentLast24h(env,sender.email); if (used + to.length > limit) throw new HttpError(429,'Daily limit reached: '+used+' of '+limit+' recipients used in the last 24 hours'); }
- const listjson = p.personal && settings.micropay_listjson;
- if (p.personal && !listjson && to.length > PERSONAL_BATCH) throw new HttpError(413,'Personalized messages go out in batches of up to '+PERSONAL_BATCH+' recipients');
+ const distinct = p.personal || p.track; const listjson = distinct && settings.micropay_listjson;
+ if (distinct && !listjson && to.length > PERSONAL_BATCH) throw new HttpError(413,'Personalized messages go out in batches of up to '+PERSONAL_BATCH+' recipients');
  // Variables are rendered per recipient; without listjson, recipients whose text comes out the same share one call.
  const bulk = p.bulk || (test && p.bulkPreview);
  const withOptout = (t: string) => bulk && settings.optout_text && !t.includes(settings.optout_text) ? t + '\n' + settings.optout_text : t;
  const contacts = new Map<string,Record<string,string>>(p.personal ? (await env.DB.prepare('SELECT number,data FROM contacts WHERE number IN (SELECT value FROM json_each(?))').bind(JSON.stringify(to)).all<{number:string;data:string}>()).results.map(r => [r.number,JSON.parse(r.data)]) : []);
- const texts = new Map<string,string>(); const groups = new Map<string,string[]>();
- for (const n of to) { const t = withOptout(p.personal ? render(p.message,settings.contact_fields,contacts.get(n) ?? null,n) : p.message);
-  if (!t.trim()) throw new HttpError(400,'The message comes out empty for '+n); if (t.length > 1000) throw new HttpError(400,p.personal ? 'The message is too long for '+n : 'Message is too long once the opt-out text is added');
-  texts.set(n,t); const g = groups.get(t); if (g) g.push(n); else groups.set(t,[n]); }
+ // Builds every recipient's text. Tracked links get new codes on each call, so a code collision is retried with new ones.
+ const build = () => {
+  const texts = new Map<string,string>(); const groups = new Map<string,string[]>(); const links: {code:string;url:string;number:string}[] = [];
+  for (const n of to) { let t = p.personal ? render(p.message,settings.contact_fields,contacts.get(n) ?? null,n) : p.message;
+   if (p.track) { const r = trackLinks(t,settings.link_base); t = r.text; for (const l of r.links) links.push({...l,number:n}); }
+   t = withOptout(t);
+   if (!t.trim()) throw new HttpError(400,'The message comes out empty for '+n); if (t.length > 1000) throw new HttpError(400,distinct ? 'The message is too long for '+n : 'Message is too long once the opt-out text is added');
+   texts.set(n,t); const g = groups.get(t); if (g) g.push(n); else groups.set(t,[n]); }
+  return {texts,groups,links};
+ };
  const now = Date.now();
- const claim = await env.DB.prepare("INSERT INTO sends (id,email,system_number,body,recipients,status,created_at,is_test) VALUES (?,?,?,?,?,'sending',?,?) ON CONFLICT(id) DO NOTHING").bind(id,sender.email,system,withOptout(p.message),to.length,now,test?1:0).run();
- if (!claim.meta.changes) return {status:'unknown',sent:to.length,counts:{accepted:0,rejected:0,unknown:0},skipped:{invalid:p.invalid,duplicates:p.duplicates,opted_out:blocked.size},task_id:null,error:null,duplicate:true};
+ const claimSend = env.DB.prepare("INSERT INTO sends (id,email,system_number,body,recipients,status,created_at,is_test) VALUES (?,?,?,?,?,'sending',?,?) ON CONFLICT(id) DO NOTHING").bind(id,sender.email,system,withOptout(p.message),to.length,now,test?1:0);
+ // The send is claimed and its links stored in one transaction, before Micropay is called, so a link works as soon as it arrives.
+ let built = build(); let claim: D1Result;
+ for (let attempt = 1;; attempt++) {
+  try { claim = built.links.length ? (await env.DB.batch([claimSend,env.DB.prepare("INSERT INTO links (code,send_id,system_number,peer_number,url,created_at) SELECT json_extract(value,'$.code'),?,?,json_extract(value,'$.number'),json_extract(value,'$.url'),? FROM json_each(?)").bind(id,system,now,JSON.stringify(built.links))]))[0] : await claimSend.run(); break; }
+  catch (e) { if (attempt >= 3 || !built.links.length || !/UNIQUE/i.test(String(e))) throw e; built = build(); }
+ }
+ const {texts,groups,links} = built;
+ if (!claim.meta.changes) {
+  // Another request claimed this ID at the same moment; the links just stored belong to nothing.
+  if (links.length) await env.DB.prepare("DELETE FROM links WHERE code IN (SELECT json_extract(value,'$.code') FROM json_each(?))").bind(JSON.stringify(links)).run();
+  return {status:'unknown',sent:to.length,counts:{accepted:0,rejected:0,unknown:0},skipped:{invalid:p.invalid,duplicates:p.duplicates,opted_out:blocked.size},task_id:null,error:null,duplicate:true};
+ }
+ const tracked = new Set(links.map(l => l.number));
  // listjson: one call with each number's own text. Otherwise one call per distinct text, up to six at a time.
  type Call = {numbers:string[];result:Awaited<ReturnType<typeof sendMicropay>>};
  let calls: Call[];
@@ -71,12 +92,13 @@ export async function executeSend(env: Env, fetcher: Fetch, token: string, id: s
  const counts = {accepted:0,rejected:0,unknown:0}; for (const c of calls) counts[c.result.submission_status] += c.numbers.length;
  const status = counts.accepted === to.length ? 'accepted' : counts.rejected === to.length ? 'rejected' : 'unknown';
  const error = calls.find(c => c.result.error)?.result.error ?? null;
- const rows = calls.flatMap(c => c.numbers.map(n => ({number:n,body:texts.get(n)!,status:c.result.submission_status,task:c.result.task_id ?? null})));
+ // Messages with tracked links start at 0 clicks; others keep NULL, which the clicks column shows as no links.
+ const rows = calls.flatMap(c => c.numbers.map(n => ({number:n,body:texts.get(n)!,status:c.result.submission_status,task:c.result.task_id ?? null,clicks:tracked.has(n) ? 0 : null})));
  // Never retried automatically: an unknown result may still have been sent.
  await env.DB.batch([
-  env.DB.prepare(`INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,provider_message_id,updated_at,sent_by,send_id) SELECT json_array('out','send:'||?1||':'||json_extract(value,'$.number')),'out',?2,json_extract(value,'$.number'),json_extract(value,'$.body'),?3,?3,'workflow',json_extract(value,'$.status'),json_extract(value,'$.task'),?3,?4,?1 FROM json_each(?5) WHERE true ON CONFLICT(event_key) DO NOTHING`).bind(id,system,now,sender.email,JSON.stringify(rows)),
+  env.DB.prepare(`INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,provider_message_id,updated_at,sent_by,send_id,clicks,auto_clicks) SELECT json_array('out','send:'||?1||':'||json_extract(value,'$.number')),'out',?2,json_extract(value,'$.number'),json_extract(value,'$.body'),?3,?3,'workflow',json_extract(value,'$.status'),json_extract(value,'$.task'),?3,?4,?1,json_extract(value,'$.clicks'),json_extract(value,'$.clicks') FROM json_each(?5) WHERE true ON CONFLICT(event_key) DO NOTHING`).bind(id,system,now,sender.email,JSON.stringify(rows)),
   env.DB.prepare('UPDATE sends SET status=?,task_id=?,error=?,finished_at=? WHERE id=?').bind(status,calls.length === 1 ? calls[0].result.task_id ?? null : null,error,Date.now(),id),
-  audit(env,sender.email,'send',system,{id,recipients:to.length,status,...(p.personal?{personalized:true,calls:calls.length}:{}),...(test?{test:true}:{}),...(p.flow?{flow:p.flow.id}:{}),...(p.stopBot?{stop_bot:true}:{})}),
+  audit(env,sender.email,'send',system,{id,recipients:to.length,status,...(distinct?{personalized:true,calls:calls.length}:{}),...(links.length?{tracked_links:links.length}:{}),...(test?{test:true}:{}),...(p.flow?{flow:p.flow.id}:{}),...(p.stopBot?{stop_bot:true}:{})}),
  ]);
  // Bot state follows only recipients the send may have reached. Starting a flow lifts a bot block for them.
  const reached = rows.filter(r => r.status !== 'rejected').map(r => r.number); const list = JSON.stringify(reached);
