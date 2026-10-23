@@ -1,6 +1,6 @@
 import {Env,HttpError,json,phone,readBody,text} from '../../../shared/validation';
 import {loadSettings} from '../../../shared/settings';
-import {Flow,Step,normalizeReply,parseFlow} from '../../../shared/bot';
+import {Flow,Step,normalizeReply,parseFlow,touchThreads} from '../../../shared/bot';
 import {User,audit} from './users';
 import {seesCustomer,seesMessage} from './scope';
 // Bot flows: admins build them; users see a customer's bot state in the messages table and can turn the bot off or on
@@ -42,8 +42,8 @@ export async function botBlock(request: Request, env: Env, user: User): Promise<
  const body = await readBody(request); const system = phone(body.system_number); const peer = phone(body.peer_number);
  if (typeof body.blocked !== 'boolean') throw new HttpError(400,'blocked must be true or false'); if (!await seesCustomer(env,user,system,peer)) throw new HttpError(403,'This customer is not in your messages');
  await env.DB.batch(body.blocked
-  ? [env.DB.prepare('INSERT INTO bot_blocks (system_number,peer_number,created_at,created_by) VALUES (?,?,?,?) ON CONFLICT DO NOTHING').bind(system,peer,Date.now(),user.email),env.DB.prepare('DELETE FROM conversations WHERE system_number=? AND peer_number=?').bind(system,peer),audit(env,user.email,'bot.block',peer,{system_number:system})]
-  : [env.DB.prepare('DELETE FROM bot_blocks WHERE system_number=? AND peer_number=?').bind(system,peer),audit(env,user.email,'bot.unblock',peer,{system_number:system})]);
+  ? [env.DB.prepare('INSERT INTO bot_blocks (system_number,peer_number,created_at,created_by) VALUES (?,?,?,?) ON CONFLICT DO NOTHING').bind(system,peer,Date.now(),user.email),env.DB.prepare('DELETE FROM conversations WHERE system_number=? AND peer_number=?').bind(system,peer),touchThreads(env,system,[peer],0,Date.now()),audit(env,user.email,'bot.block',peer,{system_number:system})]
+  : [env.DB.prepare('DELETE FROM bot_blocks WHERE system_number=? AND peer_number=?').bind(system,peer),touchThreads(env,system,[peer],0,Date.now()),audit(env,user.email,'bot.unblock',peer,{system_number:system})]);
  return json({ok:true});
 }
 export async function flows(request: Request, path: string, url: URL, env: Env, user: User): Promise<Response> {

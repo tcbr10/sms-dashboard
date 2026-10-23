@@ -21,7 +21,8 @@ The README documents setup, routes, field mapping and operations in detail.
 | Ingest | Deployed (version `b5c9443c`) with tracked links in scheduled sends, scheduled sends on the cron, variables in bot replies, lenient JSON for Micropay automations (multi-line messages), bot replies through the response or Micropay's API, the two-secret auth, opt-out detection, bot replies, webhook forwarding and an every-minute cron for delivery retries. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
 | Links | Deployed (version `b6efa440`) on its own subdomain of the owner's domain; `link_base` is set in Settings. Checked live: robots.txt, 404 for unknown codes, 302 and click counting on a temporary link (deleted). A tap from a phone has not been tried yet. |
-| D1 | `0001` to `0011` applied. On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
+| Bot chats | Built, tested and checked in the local preview (desktop and phone); **not deployed**. Needs `0012`, then ingest and the dashboard. |
+| D1 | `0001` to `0011` applied (`0012` waits for the bot chats rollout). On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
 | Outgoing logging | Not wired yet. Nothing posts to `/events/outgoing`, so the dashboard shows incoming messages only. |
 
 ## Local-only state on the owner's machine
@@ -54,6 +55,8 @@ The README documents setup, routes, field mapping and operations in detail.
 | `workers/links/src/index.ts` | Links Worker: `GET /<code>` redirect, click counting after the response, 404 page, robots.txt |
 | `shared/records.ts` | audit() and sentLast24h(), shared by both Workers |
 | `shared/bot.ts` | Bot engine: conversation state, option matching, replies, answers |
+| `workers/dashboard/src/chats.ts` | `/api/chats` (threads, live updates by `since`), `/api/chats/counts` (by state, plus flows), `/api/chats/thread` (bot state, answers and flows of one chat); scoped like messages |
+| `workers/dashboard/src/chats-page.ts` | Bot chats page: list, chat with the bot's tags and answer options, side panel, manual reply |
 | `workers/dashboard/src/forwards.ts` | `/api/admin/forwards*`: rules, delivery log, test, resend |
 | `workers/dashboard/src/flows.ts` | `/api/admin/flows*` (admins), `/api/bot/info` and `/api/bot/block` (users) |
 | `workers/dashboard/src/scope.ts` | Which messages a user may see: assigned numbers plus per-number view restrictions; used by every message query |
@@ -63,7 +66,7 @@ The README documents setup, routes, field mapping and operations in detail.
 | `workers/dashboard/src/admin-page.ts` | Admin page |
 | `shared/validation.ts` | `Env`, phone and recipient normalization, body reading, cursors |
 | `shared/settings.ts` | Settings defaults and validation, opt-out word matching (also used by ingest) |
-| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id`; `0007_forwarding_bot.sql` forwarding rules and deliveries, bot flows, conversations, answers and blocks; `0008_bot_reply_via.sql` per-number bot reply method; `0009_view_restrictions.sql` per-assignment view start and conditions; `0010_scheduled_sends.sql` scheduled sends; `0011_tracked_links.sql` links (WITHOUT ROWID, one written row per link), click columns on messages, `track_links` on scheduled sends |
+| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id`; `0007_forwarding_bot.sql` forwarding rules and deliveries, bot flows, conversations, answers and blocks; `0008_bot_reply_via.sql` per-number bot reply method; `0009_view_restrictions.sql` per-assignment view start and conditions; `0010_scheduled_sends.sql` scheduled sends; `0011_tracked_links.sql` links (WITHOUT ROWID, one written row per link), click columns on messages, `track_links` on scheduled sends; `0012_bot_threads.sql` bot chat threads (filled from existing bot messages, conversations and answers) and `messages.bot` |
 | `tests/workers.test.ts` | Miniflare D1 tests: ingest, isolation, table queries, access, admin, sending (fake Micropay) |
 | `scripts/preview.ts` | Local preview with seeded data, live inserts, a fake Micropay and the links Worker on port 8792 (`npm run preview`; `PREVIEW_USER=agent@example.com` for a regular user) |
 
@@ -101,6 +104,8 @@ The README documents setup, routes, field mapping and operations in detail.
 - **Statements over many rows use `json_each`** (imports, flow starts, bot blocks) rather than one statement per row, for the same 50-query limit.
 - **Lists are expanded in the browser** into recipients; the send endpoint stays the single place that validates and limits recipients.
 - **Cursors are UTF-8 base64url**, because contact sort values can be Hebrew.
+- **Bot chats read from a thread table, not from messages.** Building the list from messages on every poll would read far too much on the free plan. `bot_threads` holds one row per customer and number, touched by every message on it (ingest `store()`, bot replies, dashboard sends) and by bot blocks, so polls read only changed rows. The state (active, done, blocked, opted out) is derived when read. A thread's `updated_at` only moves forward, so live updates never miss a change in the same millisecond.
+- **What the bot did is stored on the messages** (`messages.bot`), because the bot never recorded unrecognized replies or which question a message asks. Older messages have no note.
 - **Tracked links are self-hosted** on a third Worker rather than a shortener service: each recipient needs a link of their own, and the services' free plans allow 5 to 25 links a month (Short.io about 1,000 in total). The links Worker is separate from ingest so public click traffic can never affect Micropay's route.
 - **The short-link address is a D1 setting (`link_base`), not a Worker variable,** because both the dashboard (send button) and ingest (scheduled sends) create links. It also keeps the hostname out of the repo.
 - **Clicks are written onto `messages`** (`clicks`, `auto_clicks`, `clicked_at`, plus `updated_at`), so the table and live polling read them without a join. The links table has no index besides its primary key; a per-send report (phase 2) will need one on `send_id`.
@@ -198,6 +203,12 @@ Found on 2026-10-13: messages on the bot's number come from a Micropay automatio
 1. Done: applied `0010`.
 2. Done: deployed ingest, then the dashboard.
 3. Optional: turn on "הודעות אישיות בקריאה אחת" in Settings after a personalized test send to the owner's phone works.
+
+## Rollout of bot chats
+
+1. Apply `0012` (`npm run db:migrate`) before deploying: ingest and the dashboard write `bot_threads` and `messages.bot`. The migration fills threads for existing bot conversations.
+2. Deploy ingest, then the dashboard.
+3. Open "שיחות בוט" and check that past bot conversations are listed.
 
 ## Rollout of tracked links
 

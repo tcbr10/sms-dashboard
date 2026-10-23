@@ -30,6 +30,21 @@ export function enterMany(env: Env, flow: Flow, step: Step, system: string, peer
   ? env.DB.prepare('DELETE FROM conversations WHERE system_number=? AND peer_number IN (SELECT value FROM json_each(?))').bind(system, JSON.stringify(peers))
   : env.DB.prepare('INSERT INTO conversations (system_number,peer_number,flow_id,step,retries,started_at,updated_at,expires_at) SELECT ?1,value,?2,?3,0,?4,?4,?5 FROM json_each(?6) WHERE true ON CONFLICT(system_number,peer_number) DO UPDATE SET flow_id=excluded.flow_id,step=excluded.step,retries=0,started_at=excluded.started_at,updated_at=excluded.updated_at,expires_at=excluded.expires_at').bind(system, flow.id, step.id, now, now + flow.expire_hours * 3600000, JSON.stringify(peers));
 }
+// Bot chat threads (one per customer and number) list the bot's conversations on the chats page. A thread opens when
+// a flow starts and is touched by every later message, so the list can be read and live-updated by update time
+// alone. updated_at only moves forward, even within one millisecond, so live updates never miss a change.
+export function openThreads(env: Env, system: string, peers: string[], flowId: number|null, now: number): D1PreparedStatement {
+ return env.DB.prepare('INSERT INTO bot_threads (system_number,peer_number,flow_id,started_at,last_at,updated_at) SELECT ?1,value,?2,?3,?3,?3 FROM json_each(?4) WHERE true ON CONFLICT(system_number,peer_number) DO UPDATE SET flow_id=COALESCE(excluded.flow_id,bot_threads.flow_id),last_at=MAX(bot_threads.last_at,excluded.last_at),updated_at=MAX(excluded.updated_at,bot_threads.updated_at+1)').bind(system, flowId, now, JSON.stringify(peers));
+}
+// For customers who already have a thread: a new message or a change of bot state. Others are left alone.
+export function touchThreads(env: Env, system: string, peers: string[], at: number, now: number): D1PreparedStatement {
+ return env.DB.prepare('UPDATE bot_threads SET last_at=MAX(last_at,?1),updated_at=MAX(?2,updated_at+1) WHERE system_number=?3 AND peer_number IN (SELECT value FROM json_each(?4))').bind(at, now, system, JSON.stringify(peers));
+}
+// What the bot did with a message, kept on the message (messages.bot) for the chats page. On a customer's message:
+// {flow,step,match:'option'|'text'|'none',retry?,gave_up?} for an answer to the question of that step, or {start}
+// when it started a flow. On the bot's own message: {flow,step} for the question it asks, with retry, start or end.
+export type BotNote = {flow?:number;step?:string;match?:'option'|'text'|'none';retry?:number;gave_up?:boolean;start?:number|boolean;end?:boolean};
+
 // Saves an answer to a contact field, merging with the contact's other fields.
 function saveField(env: Env, peer: string, field: string, value: string, now: number): D1PreparedStatement {
  return env.DB.prepare("INSERT INTO contacts (number,data,updated_at,updated_by) VALUES (?1,json_object(?2,?3),?4,'bot') ON CONFLICT(number) DO UPDATE SET data=json_set(contacts.data,'$.'||?2,?3),updated_at=?4,updated_by='bot'").bind(peer, field, value.trim().slice(0, 200), now);
@@ -50,20 +65,21 @@ export async function handleIncoming(env: Env, m: {id:number;inserted:boolean;sy
  ]);
  const end = env.DB.prepare('DELETE FROM conversations WHERE system_number=? AND peer_number=?').bind(m.system, m.peer);
  if (optedOut || blocked) { if (conv) await end.run(); return null; }
- const writes: D1PreparedStatement[] = []; let reply: string|null = null;
+ const writes: D1PreparedStatement[] = []; let reply: string|null = null; let heard: BotNote|null = null; let said: BotNote|null = null;
  const flow = conv && conv.expires_at > now ? await loadFlow(env, conv.flow_id) : null;
  const step = flow?.active ? flow.steps.find(s => s.id === conv!.step) : undefined;
  if (flow && step && conv && step.type !== 'end') {
   const option = step.type === 'options' ? matchOption(step, m.body) : undefined;
   if (step.type === 'options' && !option) {
-   if (conv.retries < MAX_RETRIES) { reply = (flow.fallback || DEFAULT_FALLBACK) + '\n' + step.text; writes.push(env.DB.prepare('UPDATE conversations SET retries=retries+1,updated_at=?,expires_at=? WHERE system_number=? AND peer_number=?').bind(now, now + flow.expire_hours * 3600000, m.system, m.peer)); }
+   const retry = conv.retries + 1; heard = {flow:flow.id,step:step.id,match:'none',...(conv.retries < MAX_RETRIES ? {retry} : {gave_up:true})};
+   if (conv.retries < MAX_RETRIES) { reply = (flow.fallback || DEFAULT_FALLBACK) + '\n' + step.text; said = {flow:flow.id,step:step.id,retry}; writes.push(env.DB.prepare('UPDATE conversations SET retries=retries+1,updated_at=?,expires_at=? WHERE system_number=? AND peer_number=?').bind(now, now + flow.expire_hours * 3600000, m.system, m.peer)); }
    else writes.push(end);
   } else {
-   const meaning = option ? option.meaning || option.reply : null;
+   const meaning = option ? option.meaning || option.reply : null; heard = {flow:flow.id,step:step.id,match:option ? 'option' : 'text'};
    writes.push(env.DB.prepare('INSERT INTO bot_answers (flow_id,system_number,peer_number,step,question,answer,meaning,message_id,at) VALUES (?,?,?,?,?,?,?,?,?)').bind(flow.id, m.system, m.peer, step.id, step.text, m.body.slice(0, 1000), meaning, m.id, now));
    if (step.field) writes.push(saveField(env, m.peer, step.field, meaning ?? m.body, now));
    const next = flow.steps.find(s => s.id === (option ? option.next : step.next));
-   if (next) { reply = next.text; writes.push(enter(env, flow, next, m.system, m.peer, now)); } else writes.push(end);
+   if (next) { reply = next.text; said = {flow:flow.id,step:next.id,...(next.type === 'end' ? {end:true} : {})}; writes.push(enter(env, flow, next, m.system, m.peer, now)); } else writes.push(end);
   }
  } else {
   if (conv) writes.push(end);
@@ -71,12 +87,18 @@ export async function handleIncoming(env: Env, m: {id:number;inserted:boolean;sy
   const flows = (await env.DB.prepare("SELECT * FROM flows WHERE system_number=? AND active=1 AND trigger IN ('any','keyword')").bind(m.system).all<Omit<Flow,'steps'> & {steps:string}>()).results.map(parseFlow);
   const text = normalizeReply(m.body), first = text.split(' ')[0];
   const start = flows.find(f => f.trigger === 'keyword' && f.keyword && [text, first].includes(normalizeReply(f.keyword))) ?? flows.find(f => f.trigger === 'any');
-  if (start?.steps.length) { reply = start.steps[0].text; writes.push(enter(env, start, start.steps[0], m.system, m.peer, now)); }
+  if (start?.steps.length) { reply = start.steps[0].text; heard = {start:start.id}; said = {flow:start.id,step:start.steps[0].id,start:true,...(start.steps[0].type === 'end' ? {end:true} : {})}; writes.push(enter(env, start, start.steps[0], m.system, m.peer, now)); }
  }
+ if (heard) writes.push(env.DB.prepare('UPDATE messages SET bot=?,updated_at=MAX(?,updated_at+1) WHERE id=?').bind(JSON.stringify(heard), now, m.id));
+ // The thread opens when a flow starts; a conversation that moved or ended also changes the thread's state. It is
+ // written after the reply, so a thread that shows as changed already has its latest message.
+ const threadFlow = heard?.flow ?? (typeof heard?.start === 'number' ? heard.start : null);
+ const thread = threadFlow !== null ? openThreads(env, m.system, [m.peer], threadFlow, now) : conv ? touchThreads(env, m.system, [m.peer], now, now) : null;
  // State and answers are written first, so variables in the reply ({שם}…) see an answer this step just saved.
  if (writes.length) await env.DB.batch(writes);
  if (reply && hasVariables(reply)) { const [settings,contact] = await Promise.all([loadSettings(env.DB),env.DB.prepare('SELECT data FROM contacts WHERE number=?').bind(m.peer).first<{data:string}>()]); reply = render(reply,settings.contact_fields,contact ? JSON.parse(contact.data) : null,m.peer) || null; }
  // The reply is logged as an outgoing message from the bot.
- if (reply) await env.DB.prepare("INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,updated_at,sent_by) VALUES (?,'out',?,?,?,?,?,'workflow',?,?,?) ON CONFLICT(event_key) DO NOTHING").bind(key, m.system, m.peer, reply, now, now, status, now, BOT_SENDER).run();
+ const logged = reply ? env.DB.prepare("INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,updated_at,sent_by,bot) VALUES (?,'out',?,?,?,?,?,'workflow',?,?,?,?) ON CONFLICT(event_key) DO NOTHING").bind(key, m.system, m.peer, reply, now, now, status, now, BOT_SENDER, said ? JSON.stringify(said) : null) : null;
+ const after = [logged, thread].filter((x): x is D1PreparedStatement => x !== null); if (after.length) await env.DB.batch(after);
  return reply;
 }

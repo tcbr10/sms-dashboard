@@ -7,7 +7,7 @@ type Row = {id:number;sort_key:number|string;contact:string|null;[key:string]:un
 const FROM = 'messages m LEFT JOIN contacts c ON c.number=m.peer_number LEFT JOIN sends s ON s.id=m.send_id';
 // Counts join contacts only when a search or contact filter needs them; D1 bills every joined row read.
 const COUNT_FROM = 'messages m LEFT JOIN contacts c ON c.number=m.peer_number';
-const columns = 'm.id,m.direction,m.system_number,m.peer_number,m.body,m.occurred_at,m.received_at,m.time_source,m.submission_status,m.provider_message_id,m.updated_at,m.sent_by,m.import_id,m.clicks,m.auto_clicks,m.clicked_at,c.data AS contact,COALESCE(s.is_test,0) AS is_test';
+const columns = 'm.id,m.direction,m.system_number,m.peer_number,m.body,m.occurred_at,m.received_at,m.time_source,m.submission_status,m.provider_message_id,m.updated_at,m.sent_by,m.import_id,m.clicks,m.auto_clicks,m.clicked_at,m.bot,c.data AS contact,COALESCE(s.is_test,0) AS is_test';
 // Whitelisted sort expressions. Incoming rows have no status or sender, so they sort as ''.
 const sorts: Record<string,string> = {time:'m.occurred_at',received:'m.received_at',direction:'m.direction',peer:'m.peer_number',number:'m.system_number',status:"COALESCE(m.submission_status,'')",sent_by:"COALESCE(m.sent_by,'')",clicks:'COALESCE(m.clicks+1,0)'};
 // Clicks sort as count+1 so messages without tracked links (0) come below unclicked ones and cursors stay non-negative.
@@ -21,7 +21,7 @@ function choice<T extends string>(p: URLSearchParams, name: string, allowed: rea
 function list<T extends string>(p: URLSearchParams, name: string, allowed: readonly T[]): T[] { const raw=p.get(name); if (!raw) return []; const values=[...new Set(raw.split(','))]; if (values.some(v => !allowed.includes(v as T))) throw new HttpError(400,'Invalid '+name); return values as T[]; }
 function contains(p: URLSearchParams, name: string): string|null { const v=p.get(name); if (!v) return null; if (v.length>200) throw new HttpError(400,'Filter too long'); return v; }
 // Customer numbers are stored as +972…; a search typed in local form (05…) is matched against that.
-const phoneNeedle = (v: string) => { const d=v.replace(/[^0-9+]/g,''); return d.startsWith('0') ? '+972'+d.slice(1) : d || v; };
+export const phoneNeedle = (v: string) => { const d=v.replace(/[^0-9+]/g,''); return d.startsWith('0') ? '+972'+d.slice(1) : d || v; };
 // Admins see every active number; users only the numbers assigned to them. The allowed numbers are an uncorrelated IN
 // subquery, evaluated once per query instead of once per message row. The leading + keeps SQLite from choosing the
 // per-number index for this condition, which would read every message of those numbers and sort them.
@@ -76,5 +76,5 @@ export async function data(url: URL, env: Env, user: User): Promise<Response> {
  const result=await env.DB.prepare(`SELECT ${columns},${expr} AS sort_key FROM ${from} WHERE ${conditions.join(' AND ')} ORDER BY ${expr} ${dir},m.id ${dir} LIMIT ?`).bind(...bindings,limit+1).all<Row>();
  const more=result.results.length>limit; const page=result.results.slice(0,limit); const last=page.at(-1);
  const next=last?encodeCursor({t:last.sort_key,id:last.id}):null;
- return json({messages:page.map(({sort_key,contact,...m})=>({...m,contact:contact?JSON.parse(contact):null})),has_more:more,next_cursor:more?next:null,sync_cursor:updates?(next||p.get('since')):encodeCursor({t:syncStart,id:0})});
+ return json({messages:page.map(({sort_key,contact,bot,...m})=>({...m,bot:typeof bot==='string'?JSON.parse(bot):null,contact:contact?JSON.parse(contact):null})),has_more:more,next_cursor:more?next:null,sync_cursor:updates?(next||p.get('since')):encodeCursor({t:syncStart,id:0})});
 }

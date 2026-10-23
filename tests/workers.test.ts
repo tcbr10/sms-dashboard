@@ -16,7 +16,7 @@ let mf:Miniflare;let env:Env;
 const number='+972501234567',other='+972501234568',peer='+972509876543',token='a'.repeat(40),outToken='b'.repeat(40),message='שלום 👋\n& + "בדיקה" %20';
 beforeAll(async()=>{mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("test")}}',compatibilityDate:'2026-08-06',d1Databases:{DB:'sms-test'}});const bindings=await mf.getBindings();env={DB:bindings.DB as D1Database,INCOMING_TOKEN:token,OUTGOING_TOKEN:outToken};const dir=new URL('../migrations/',import.meta.url);for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(file,dir),'utf8')).split(';').filter(s=>s.trim()))await env.DB.prepare(sql).run();});
 afterAll(async()=>{await mf?.dispose();});
-beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','imports','forward_rules','deliveries','flows','conversations','bot_answers','bot_blocks','scheduled_sends','links','system_numbers'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers (number,label,active) VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
+beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','imports','forward_rules','deliveries','flows','conversations','bot_answers','bot_blocks','scheduled_sends','links','bot_threads','system_numbers'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers (number,label,active) VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
 const user=(email:string,role:'admin'|'user'='user'):User=>({email,name:'',role,can_bulk_send:0,daily_limit:null,density:null,columns:null,test_number:null,sessions_revoked_at:null,can_edit_contacts:1});
 const ctx={waitUntil(){},passThroughOnException(){}} as unknown as ExecutionContext;
 function send(body:Record<string,unknown>,out=false,secret=out?outToken:token){return ingestion.fetch(new Request('https://ingest.test'+(out?'/events/outgoing':'/hooks/incoming'),{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+secret},body:JSON.stringify({event_id:'event-1',system_number:number,peer_number:peer,body:message,...body})}),env);}
@@ -512,4 +512,61 @@ describe('tracked links',()=>{
   expect((await body(api('admin@example.com','/api/scheduled')) as {scheduled:{track_links:number}[]}).scheduled[0].track_links).toBe(1);
   await env.DB.prepare('UPDATE scheduled_sends SET send_at=1').run();expect(await runScheduled({...env,MICROPAY_TOKEN:'t'},fetcher)).toBe(true);
   expect(await links()).toHaveLength(4);expect((await message(peer))!.body).toMatch(/^מבצע https:\/\/l\.test\/[A-Za-z0-9]{7} ושוב/);});
+});
+describe('bot chats',()=>{
+ const steps=[{id:'s1',type:'options',text:'מעוניינים? 1 כן 2 לא',options:[{reply:'1, כן',meaning:'מעוניין',next:'s2'},{reply:'2',meaning:'לא מעוניין',next:'s3'}]},
+  {id:'s2',type:'text',text:'מה השם המלא?',field:'name',next:'s3'},{id:'s3',type:'end',text:'תודה!'}];
+ const flow=async(b:Record<string,unknown>={})=>(await body(api('admin@example.com','/api/admin/flows/save',{name:'סקר',system_number:number,trigger:'any',steps,fallback:'',expire_hours:24,active:true,...b}))).id as number;
+ let n=0;const say=async(text:string,from='0509876543')=>{const r=await ingest(callback('json',{origsms:text,msgid:'c'+(++n),phone:from}),env);expect(r.status).toBe(200);};
+ const list=async(email:string,q='')=>body(api(email,'/api/chats'+q)) as Promise<{threads:{peer_number:string;state:string;flow:string;last:{body:string;direction:string}|null;updated_at:number}[];sync_cursor:string}>;
+ const meta=(email:string,p=peer)=>api(email,'/api/chats/thread?system_number='+encodeURIComponent(number)+'&peer_number='+encodeURIComponent(p));
+ const notes=async()=>(await env.DB.prepare('SELECT direction,body,bot FROM messages WHERE peer_number=? ORDER BY id').bind(peer).all<{direction:string;body:string;bot:string|null}>()).results.map(r=>[r.direction,r.body,r.bot?JSON.parse(r.bot):null]);
+ it('records what the bot made of each reply and which question each bot message asks',async()=>{const id=await flow();
+  await say('שלום');await say('3');await say('1');await say('דנה');
+  expect(await notes()).toEqual([['in','שלום',{start:id}],['out','מעוניינים? 1 כן 2 לא',{flow:id,step:'s1',start:true}],
+   ['in','3',{flow:id,step:'s1',match:'none',retry:1}],['out','לא זיהינו את התשובה.\nמעוניינים? 1 כן 2 לא',{flow:id,step:'s1',retry:1}],
+   ['in','1',{flow:id,step:'s1',match:'option'}],['out','מה השם המלא?',{flow:id,step:'s2'}],['in','דנה',{flow:id,step:'s2',match:'text'}],['out','תודה!',{flow:id,step:'s3',end:true}]]);
+  await env.DB.prepare('DELETE FROM messages').run();await env.DB.prepare('DELETE FROM bot_threads').run();
+  await say('שלום');await say('x');await say('y');await say('z');
+  expect((await notes()).slice(-1)).toEqual([['in','z',{flow:id,step:'s1',match:'none',gave_up:true}]]);
+  expect((await read('alice@example.com','?direction=in&peer_number='+encodeURIComponent(peer))).messages[0].bot).toEqual({flow:id,step:'s1',match:'none',gave_up:true});});
+ it('lists threads with their state, flow and latest message, and returns the bot state of one',async()=>{const id=await flow();
+  await say('שלום');await say('1');
+  const l=await list('alice@example.com');expect(l.threads).toHaveLength(1);expect(l.threads[0]).toMatchObject({peer_number:peer,state:'active',flow:'סקר',last:{body:'מה השם המלא?',direction:'out'}});
+  expect(await body(api('alice@example.com','/api/chats/counts'))).toMatchObject({counts:{active:1,done:0,blocked:0,opted_out:0},flows:[{id,name:'סקר'}]});
+  const m=await body(meta('alice@example.com'));expect(m).toMatchObject({conversation:{flow_id:id,step:'s2',retries:0},blocked:null,opted_out:null,answers:[{step:'s1',answer:'1',meaning:'מעוניין'}]});
+  expect((m.flows as {steps:{id:string}[]}[])[0].steps.map(s=>s.id)).toEqual(['s1','s2','s3']);
+  await say('דנה');expect((await list('alice@example.com')).threads[0]).toMatchObject({state:'done',last:{body:'תודה!'}});
+  expect((await list('alice@example.com','?state=active')).threads).toHaveLength(0);expect((await list('alice@example.com','?state=done')).threads).toHaveLength(1);
+  expect((await list('alice@example.com','?q=דנה')).threads).toHaveLength(1);expect((await list('alice@example.com','?q=0509876')).threads).toHaveLength(1);expect((await list('alice@example.com','?q=nobody')).threads).toHaveLength(0);
+  expect((await list('alice@example.com','?flow='+(id+1))).threads).toHaveLength(0);expect((await api('alice@example.com','/api/chats?state=open')).status).toBe(400);});
+ it('updates live for new messages, bot blocks and opt-outs',async()=>{await flow();const third='0521234567';
+  await say('שלום');await say('שלום',third);const first=await list('alice@example.com');expect(first.threads).toHaveLength(2);
+  const since=async(c:string)=>list('alice@example.com','?since='+c);
+  let s=await since(first.sync_cursor);expect(s.threads).toHaveLength(0);
+  await env.DB.prepare("UPDATE user_numbers SET can_send=1 WHERE email='alice@example.com' AND system_number=?").bind(number).run();
+  expect((await api('alice@example.com','/api/bot/block',{system_number:number,peer_number:peer,blocked:true})).status).toBe(200);
+  s=await since(first.sync_cursor);expect(s.threads.map(t=>[t.peer_number,t.state])).toEqual([[peer,'blocked']]);
+  await say('הסר',third);s=await since(s.sync_cursor);expect(s.threads.map(t=>[t.peer_number,t.state,t.last?.body])).toEqual([['+972521234567','opted_out','הסר']]);
+  expect(await body(api('alice@example.com','/api/chats/counts'))).toMatchObject({counts:{active:0,blocked:1,opted_out:1}});
+  // A message that starts a flow opens a thread; one that no flow answers does not.
+  await say('שלום','0541112233');await env.DB.prepare('DELETE FROM flows').run();await say('עוד','0549998877');expect((await list('alice@example.com')).threads).toHaveLength(3);});
+ it('shows threads only on the user\'s numbers and within their view restrictions',async()=>{await flow();await say('שלום');
+  expect((await list('bob@example.com')).threads).toHaveLength(0);expect((await meta('bob@example.com')).status).toBe(404);
+  expect((await list('admin@example.com')).threads).toHaveLength(1);
+  await env.DB.prepare("UPDATE user_numbers SET view_from=? WHERE email='alice@example.com' AND system_number=?").bind(Date.now()+3600000,number).run();
+  expect((await list('alice@example.com')).threads).toHaveLength(0);expect((await meta('alice@example.com')).status).toBe(404);
+  expect(await body(api('alice@example.com','/api/chats/counts'))).toMatchObject({counts:{active:0}});});
+ it('opens threads for a send that starts a flow and moves existing ones on other sends',async()=>{const id=await flow({trigger:'send'});
+  const fetcher=async()=>new Response('OK 1');const sendAs=(b:Record<string,unknown>)=>handle(new Request(ORIGIN+'/api/send',{method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify({id:crypto.randomUUID(),system_number:number,recipients:[peer],...b})}),{...env,MICROPAY_TOKEN:'t'},'admin@example.com',{fetcher}).catch(failure);
+  expect((await sendAs({flow_id:id})).status).toBe(200);const l=await list('admin@example.com');expect(l.threads[0]).toMatchObject({peer_number:peer,state:'active',flow:'סקר'});
+  expect(JSON.parse((await env.DB.prepare("SELECT bot FROM messages WHERE direction='out'").first<{bot:string}>())!.bot)).toEqual({flow:id,step:'s1',start:true});
+  await sendAs({body:'תזכורת'});const s=await list('admin@example.com','?since='+l.sync_cursor);expect(s.threads[0].last?.body).toBe('תזכורת');
+  await sendAs({recipients:['0541112233'],body:'בלי בוט'});expect((await list('admin@example.com')).threads).toHaveLength(1);});
+ it('fills threads for conversations from before the chats page',async()=>{const id=await flow();await say('שלום');await say('1');await env.DB.prepare('DELETE FROM bot_threads').run();
+  const sql=(await readFile(new URL('../migrations/0012_bot_threads.sql',import.meta.url),'utf8')).split(';').map(x=>x.trim()).find(x=>x.startsWith('INSERT INTO bot_threads'))!;await env.DB.prepare(sql).run();
+  const row=await env.DB.prepare('SELECT flow_id,started_at,last_at FROM bot_threads').first<{flow_id:number;started_at:number;last_at:number}>();
+  // A thread starts at the bot's first message, as it does live.
+  const times=(await env.DB.prepare("SELECT MIN(CASE WHEN sent_by='בוט' THEN occurred_at END) AS a,MAX(occurred_at) AS b FROM messages").first<{a:number;b:number}>())!;
+  expect(row).toEqual({flow_id:id,started_at:times.a,last_at:times.b});});
 });

@@ -2,7 +2,7 @@ import {Env, HttpError, failure, json, phone, readBody, text, timestamp} from '.
 import {readMicropay, micropayAcknowledgement} from './micropay';
 import {DEFAULT_SETTINGS, isOptOut} from '../../../shared/settings';
 import {Fetch, deliver, enqueue, runDue} from '../../../shared/forwarding';
-import {handleIncoming} from '../../../shared/bot';
+import {handleIncoming,touchThreads} from '../../../shared/bot';
 import {sendMicropay} from '../../../shared/micropay-send';
 import {runScheduled} from '../../../shared/scheduled';
 async function equal(a: string, b: string): Promise<boolean> { const hash = async (s: string) => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))); const [x,y] = await Promise.all([hash(a),hash(b)]); let difference = 0; for (let i=0;i<x.length;i++) difference |= x[i] ^ y[i]; return difference === 0; }
@@ -25,6 +25,8 @@ async function store(direction: 'in'|'out', body: Record<string, unknown>, env: 
  const written = await env.DB.prepare(sql).bind(key,direction,system,peer,message,occurred,now,timeSource,status,providerId,now).run();
  const stored = await env.DB.prepare('SELECT id,system_number,peer_number,body,submission_status FROM messages WHERE event_key = ?').bind(key).first<{id:number;system_number:string;peer_number:string;body:string;submission_status:string|null}>();
  if (!stored) throw new Error('Persistence failed');
+ // A new message in a customer's bot chat moves that chat up the chats page.
+ if (written.meta.changes > 0) await touchThreads(env, system, [peer], occurred, now).run();
  if (stored.system_number !== system || stored.peer_number !== peer || stored.body !== message) throw new HttpError(409, 'Event ID reused with different message content');
  if (direction === 'out' && status !== stored.submission_status && status !== 'pending' && status !== 'unknown') throw new HttpError(409, 'Conflicting final submission status');
  if (direction === 'in' && message.length <= 30) await optOut(env, peer, message);

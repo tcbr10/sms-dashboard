@@ -41,6 +41,17 @@ for (let i = 0; i < 160; i++) {
  if (outgoing) await post('/events/outgoing', out, {event_id: 'seed-' + i, system_number: system, peer_number: peer, body: replies[i % replies.length], occurred_at: at, submission_status: statuses[i % statuses.length]});
  else await post('/hooks/incoming', token, {event_id: 'seed-' + i, system_number: system, peer_number: peer, body: texts[i % texts.length], occurred_at: at});
 }
+// A sample bot flow and a few conversations with it, for the chats page (they go through Micropay's route, where the bot runs).
+const steps = [
+ {id: 's1', type: 'options', text: 'שלום! במה נוכל לעזור?\n1 תור חדש\n2 ביטול תור', options: [{reply: '1', meaning: 'תור חדש', next: 's2'}, {reply: '2', meaning: 'ביטול תור', next: 's4'}]},
+ {id: 's2', type: 'options', text: 'איזה יום מתאים? א ראשון, ב שני, ג שלישי', options: [{reply: 'א, ראשון', meaning: 'ראשון', next: 's3'}, {reply: 'ב, שני', meaning: 'שני', next: 's3'}, {reply: 'ג, שלישי', meaning: 'שלישי', next: 's3'}]},
+ {id: 's3', type: 'text', text: 'מה השם המלא לרישום התור?', field: 'name', next: 's5'},
+ {id: 's5', type: 'end', text: 'תודה {שם}! התור נקבע, נשלח תזכורת יום לפני.'}, {id: 's4', type: 'end', text: 'התור בוטל. תודה!'}];
+await env.DB.prepare("INSERT INTO flows (name,system_number,trigger,steps,fallback,expire_hours,active,created_at,updated_at) VALUES ('קביעת תור','+972501234567','any',?,'',24,1,1,1)").bind(JSON.stringify(steps)).run();
+let bot = 0;
+const sayBot = (from: string, text: string) => post('/hooks/micropay/incoming', token, {origsms: text, phone: from, dest: '0501234567', msgid: 'bot-' + (++bot)});
+for (const [from, texts] of [['0521234567', ['שלום', '1', 'ב', 'אבי לוי']], ['0546667788', ['מה זה?', 'הסר']], ['0587654321', ['היי', 'בבקשה', 'לא יודע', 'אולי']], ['0531234567', ['היי, אפשר לקבוע תור?', '1', 'מתי שנוח לכם', 'ג']]] as const)
+ for (const t of texts) await sayBot(from, t);
 // A new incoming message every 6 seconds, and a pending outgoing message that gets accepted, to exercise live updates.
 setInterval(async () => {
  n++; const peer = peers[n % peers.length];

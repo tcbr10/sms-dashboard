@@ -3,7 +3,7 @@ import {Settings,loadSettings} from './settings';
 import {Fetch,micropayNumber,sendMicropay} from './micropay-send';
 import {micropaySubmission} from './micropay-submission';
 import {audit,sentLast24h} from './records';
-import {Flow,enterMany,loadFlow} from './bot';
+import {Flow,enterMany,loadFlow,openThreads,touchThreads} from './bot';
 import {hasVariables,render,unknownVariables} from './template';
 import {findLinks,trackLinks} from './links';
 // Sending, shared by the dashboard's send button and by scheduled sends run from the ingest Worker's timer.
@@ -93,18 +93,21 @@ export async function executeSend(env: Env, fetcher: Fetch, token: string, id: s
  const status = counts.accepted === to.length ? 'accepted' : counts.rejected === to.length ? 'rejected' : 'unknown';
  const error = calls.find(c => c.result.error)?.result.error ?? null;
  // Messages with tracked links start at 0 clicks; others keep NULL, which the clicks column shows as no links.
- const rows = calls.flatMap(c => c.numbers.map(n => ({number:n,body:texts.get(n)!,status:c.result.submission_status,task:c.result.task_id ?? null,clicks:tracked.has(n) ? 0 : null})));
+ // A send that starts a flow asks its first question, which the chats page shows with the flow's options.
+ const bot = p.flow ? JSON.stringify({flow:p.flow.id,step:p.flow.steps[0].id,start:true}) : null;
+ const rows = calls.flatMap(c => c.numbers.map(n => ({number:n,body:texts.get(n)!,status:c.result.submission_status,task:c.result.task_id ?? null,clicks:tracked.has(n) ? 0 : null,bot})));
  // Never retried automatically: an unknown result may still have been sent.
  await env.DB.batch([
-  env.DB.prepare(`INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,provider_message_id,updated_at,sent_by,send_id,clicks,auto_clicks) SELECT json_array('out','send:'||?1||':'||json_extract(value,'$.number')),'out',?2,json_extract(value,'$.number'),json_extract(value,'$.body'),?3,?3,'workflow',json_extract(value,'$.status'),json_extract(value,'$.task'),?3,?4,?1,json_extract(value,'$.clicks'),json_extract(value,'$.clicks') FROM json_each(?5) WHERE true ON CONFLICT(event_key) DO NOTHING`).bind(id,system,now,sender.email,JSON.stringify(rows)),
+  env.DB.prepare(`INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,provider_message_id,updated_at,sent_by,send_id,clicks,auto_clicks,bot) SELECT json_array('out','send:'||?1||':'||json_extract(value,'$.number')),'out',?2,json_extract(value,'$.number'),json_extract(value,'$.body'),?3,?3,'workflow',json_extract(value,'$.status'),json_extract(value,'$.task'),?3,?4,?1,json_extract(value,'$.clicks'),json_extract(value,'$.clicks'),json_extract(value,'$.bot') FROM json_each(?5) WHERE true ON CONFLICT(event_key) DO NOTHING`).bind(id,system,now,sender.email,JSON.stringify(rows)),
+  touchThreads(env,system,to,now,now),
   env.DB.prepare('UPDATE sends SET status=?,task_id=?,error=?,finished_at=? WHERE id=?').bind(status,calls.length === 1 ? calls[0].result.task_id ?? null : null,error,Date.now(),id),
   audit(env,sender.email,'send',system,{id,recipients:to.length,status,...(distinct?{personalized:true,calls:calls.length}:{}),...(links.length?{tracked_links:links.length}:{}),...(test?{test:true}:{}),...(p.flow?{flow:p.flow.id}:{}),...(p.stopBot?{stop_bot:true}:{})}),
  ]);
  // Bot state follows only recipients the send may have reached. Starting a flow lifts a bot block for them.
  const reached = rows.filter(r => r.status !== 'rejected').map(r => r.number); const list = JSON.stringify(reached);
  if (reached.length && !test && (p.flow || p.stopBot)) await env.DB.batch(p.flow
-  ? [env.DB.prepare('DELETE FROM bot_blocks WHERE system_number=? AND peer_number IN (SELECT value FROM json_each(?))').bind(system,list),enterMany(env,p.flow,p.flow.steps[0],system,reached,now)]
-  : [env.DB.prepare('INSERT INTO bot_blocks (system_number,peer_number,created_at,created_by) SELECT ?,value,?,? FROM json_each(?) WHERE true ON CONFLICT DO NOTHING').bind(system,now,sender.email,list),env.DB.prepare('DELETE FROM conversations WHERE system_number=? AND peer_number IN (SELECT value FROM json_each(?))').bind(system,list)]);
+  ? [env.DB.prepare('DELETE FROM bot_blocks WHERE system_number=? AND peer_number IN (SELECT value FROM json_each(?))').bind(system,list),enterMany(env,p.flow,p.flow.steps[0],system,reached,now),openThreads(env,system,reached,p.flow.id,now)]
+  : [env.DB.prepare('INSERT INTO bot_blocks (system_number,peer_number,created_at,created_by) SELECT ?,value,?,? FROM json_each(?) WHERE true ON CONFLICT DO NOTHING').bind(system,now,sender.email,list),env.DB.prepare('DELETE FROM conversations WHERE system_number=? AND peer_number IN (SELECT value FROM json_each(?))').bind(system,list),touchThreads(env,system,reached,now,now)]);
  return {status,sent:to.length,counts,skipped:{invalid:p.invalid,duplicates:p.duplicates,opted_out:blocked.size},task_id:calls.length === 1 ? calls[0].result.task_id ?? null : null,error:status === 'accepted' ? null : error};
 }
 // Micropay's listjson: one call where each number gets its own text (it replaces list and msg).

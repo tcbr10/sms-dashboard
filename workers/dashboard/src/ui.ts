@@ -167,11 +167,11 @@ input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--accent)}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 `;
-export function header(current: 'messages'|'admin', live: boolean): string {
+export function header(current: 'messages'|'chats'|'admin', live: boolean): string {
  const link = (href: string, label: string, id: string, on: boolean, hidden: boolean) => '<a href="'+href+'" id="'+id+'"'+(on?' aria-current="page"':'')+(hidden?' hidden':'')+'>'+label+'</a>';
  const density = (['wide','narrow','dense'] as const).map(d => '<button type="button" data-density="'+d+'" title="'+{wide:'רחב',narrow:'צר',dense:'צפוף'}[d]+'" aria-label="'+{wide:'רחב',narrow:'צר',dense:'צפוף'}[d]+'" aria-pressed="false">'+svg(d)+'</button>').join('');
  return '<header class="top"><div class="wrap"><div class="brand"><span class="logo">'+svg('chat')+'</span><div><h1>הודעות SMS</h1><p class="sub" id="org">מצב הגשה אינו אישור מסירה</p></div></div>'
-  +'<nav class="nav" aria-label="ניווט">'+link('/','הודעות','nav-messages',current==='messages',false)+link('/admin','ניהול','nav-admin',current==='admin',current!=='admin')+'</nav>'
+  +'<nav class="nav" aria-label="ניווט">'+link('/','הודעות','nav-messages',current==='messages',false)+link('/chats','שיחות בוט','nav-chats',current==='chats',false)+link('/admin','ניהול','nav-admin',current==='admin',current!=='admin')+'</nav>'
   +'<div class="top-end"><div class="density" role="group" aria-label="מרווח שורות">'+density+'</div>'
   +(live?'<span class="live" id="live" role="status"><span class="dot"></span><span id="live-text">מתחבר…</span></span>':'')
   +'<button type="button" class="who" id="who" aria-haspopup="dialog" aria-expanded="false" aria-label="החשבון שלי"></button></div></div></header>';
