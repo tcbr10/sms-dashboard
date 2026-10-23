@@ -1,23 +1,46 @@
 import {Env} from '../../../shared/validation';
 import {CODE_LENGTH,Link,classify,recordClick} from '../../../shared/links';
+import {audit} from '../../../shared/records';
 // Links Worker: the public short-link address. GET /<code> redirects to the link's original address at once and counts
-// the click afterwards (waitUntil), so a slow or failing count never delays or breaks the redirect. It has no Access in
-// front of it and only reads and counts links; it never sends anything.
+// the click afterwards (waitUntil), so a slow or failing count never delays or breaks the redirect. /x/<code> is a
+// recipient's opt-out page (sends with a sender ID carry it). It has no Access in front of it and never sends anything.
 const CODE = new RegExp('^/([A-Za-z0-9]{'+CODE_LENGTH+'})[^A-Za-z0-9]*$');
+const OPTOUT = new RegExp('^/x/([A-Za-z0-9]{'+CODE_LENGTH+'})[^A-Za-z0-9]*$');
 const HEADERS = {'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Robots-Tag':'noindex, nofollow','X-Content-Type-Options':'nosniff'};
-function page(status: number, title: string, text: string): Response {
- return new Response('<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+title+'</title><style>body{font:17px/1.5 system-ui,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;background:#f6f7f9;color:#1f2933}main{padding:24px;text-align:center}h1{font-size:20px;margin:0 0 6px}p{margin:0;color:#52606d}</style><main><h1>'+title+'</h1><p>'+text+'</p></main></html>',{status,headers:{...HEADERS,'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'"}});
+const esc = (s: string) => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]!);
+function page(status: number, title: string, text: string, form = ''): Response {
+ return new Response('<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+'</title><style>body{font:17px/1.5 system-ui,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;background:#f6f7f9;color:#1f2933}main{padding:24px;text-align:center;max-width:420px}h1{font-size:20px;margin:0 0 6px}p{margin:0;color:#52606d}form{margin-top:20px}button{font:inherit;font-weight:600;min-height:48px;padding:0 24px;border:0;border-radius:10px;background:#c2410c;color:#fff;cursor:pointer}</style><main><h1>'+esc(title)+'</h1><p>'+esc(text)+'</p>'+form+'</main></html>',{status,headers:{...HEADERS,'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"}});
+}
+const notFound = () => page(404,'הקישור לא נמצא','ייתכן שהקישור הועתק באופן חלקי.');
+const unavailable = () => page(503,'שגיאה זמנית','לא ניתן לפתוח את הקישור כרגע. נסו שוב בעוד כמה דקות.');
+// Opening the opt-out link only asks; the button (a POST) opts the number out. Link previews and scanners open links
+// with GET, so they can never remove anyone.
+async function optout(request: Request, env: Env, code: string): Promise<Response> {
+ let row: {peer_number:string;opted:number}|null;
+ try { row = await env.DB.prepare('SELECT c.peer_number,EXISTS (SELECT 1 FROM opt_outs o WHERE o.number=c.peer_number) AS opted FROM optout_codes c WHERE c.code=?').bind(code).first(); }
+ catch { return unavailable(); }
+ if (!row) return notFound();
+ const ending = row.peer_number.slice(-4);
+ if (request.method === 'POST') {
+  try { await env.DB.batch([env.DB.prepare("INSERT INTO opt_outs (number,source,created_at) VALUES (?,'link',?) ON CONFLICT(number) DO NOTHING").bind(row.peer_number,Date.now()),audit(env,'opt-out link','optout.add',row.peer_number,{source:'link'})]); }
+  catch { return unavailable(); }
+  return page(200,'הוסרת מרשימת התפוצה','המספר המסתיים ב-'+ending+' לא יקבל מאיתנו הודעות נוספות.');
+ }
+ if (row.opted) return page(200,'המספר כבר הוסר','המספר המסתיים ב-'+ending+' כבר לא מקבל מאיתנו הודעות.');
+ return page(200,'הסרה מרשימת התפוצה','להפסיק לשלוח הודעות למספר המסתיים ב-'+ending+'?','<form method="post"><button type="submit">כן, להסיר אותי</button></form>');
 }
 export async function redirect(request: Request, env: Env, waitUntil: (p: Promise<unknown>) => void): Promise<Response> {
  const url = new URL(request.url);
+ const opt = OPTOUT.exec(url.pathname)?.[1];
+ if (opt && ['GET','HEAD','POST'].includes(request.method)) return optout(request,env,opt);
  if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Method not allowed',{status:405,headers:{...HEADERS,Allow:'GET, HEAD'}});
  if (url.pathname === '/robots.txt') return new Response('User-agent: *\nDisallow: /\n',{headers:{...HEADERS,'Content-Type':'text/plain'}});
  const code = CODE.exec(url.pathname)?.[1];
- if (!code) return page(404,'הקישור לא נמצא','ייתכן שהקישור הועתק באופן חלקי.');
+ if (!code) return notFound();
  let link: Link | null;
  try { link = await env.DB.prepare('SELECT code,url,send_id,peer_number,created_at FROM links WHERE code=?').bind(code).first<Link>(); }
- catch { return page(503,'שגיאה זמנית','לא ניתן לפתוח את הקישור כרגע. נסו שוב בעוד כמה דקות.'); }
- if (!link) return page(404,'הקישור לא נמצא','ייתכן שהקישור הועתק באופן חלקי.');
+ catch { return unavailable(); }
+ if (!link) return notFound();
  // HEAD requests are only ever automatic checks, so they are redirected without counting.
  if (request.method === 'GET') { const now = Date.now(); waitUntil(recordClick(env,link,classify(request,link.created_at,now),now).catch(() => undefined)); }
  return new Response(null,{status:302,headers:{...HEADERS,Location:link.url}});

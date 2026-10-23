@@ -1,5 +1,6 @@
 import {Env,HttpError,json,phone,readBody,recipient,text} from '../../../shared/validation';
-import {loadSettings} from '../../../shared/settings';
+import {OPTOUT_LINK,loadSettings} from '../../../shared/settings';
+import {optoutUrl} from '../../../shared/links';
 import {render,unknownVariables} from '../../../shared/template';
 import {executeSend,prepareSend} from '../../../shared/dispatch';
 import {audit} from '../../../shared/records';
@@ -28,16 +29,16 @@ async function schedule(env: Env, user: User, id: string, body: Record<string,un
  if (!Number.isSafeInteger(at) || (at as number) < now + 60000 || (at as number) > now + YEAR) throw new HttpError(400,'Choose a send time at least a minute from now and within a year');
  if (body.test === true) throw new HttpError(400,'Test sends cannot be scheduled');
  const p = await prepareSend(env,user,body);
- const r = await env.DB.prepare("INSERT INTO scheduled_sends (id,email,system_number,body,recipients,invalid,duplicates,flow_id,stop_bot,track_links,send_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'scheduled',?,?) ON CONFLICT(id) DO NOTHING").bind(id,user.email,p.system,p.message,JSON.stringify(p.recipients),p.invalid,p.duplicates,p.flow?.id ?? null,p.stopBot?1:0,p.track?1:0,at,now,now).run();
+ const r = await env.DB.prepare("INSERT INTO scheduled_sends (id,email,system_number,body,recipients,invalid,duplicates,flow_id,stop_bot,track_links,sender_id,send_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'scheduled',?,?) ON CONFLICT(id) DO NOTHING").bind(id,user.email,p.system,p.message,JSON.stringify(p.recipients),p.invalid,p.duplicates,p.flow?.id ?? null,p.stopBot?1:0,p.track?1:0,p.from?.id ?? null,at,now,now).run();
  if (!r.meta.changes) { const s = await env.DB.prepare('SELECT email,send_at FROM scheduled_sends WHERE id=?').bind(id).first<{email:string;send_at:number}>(); if (s?.email !== user.email) throw new HttpError(409,'Send ID already used'); return json({id,scheduled:true,send_at:s.send_at,recipients:p.recipients.length,duplicate:true}); }
- await audit(env,user.email,'send.schedule',p.system,{id,recipients:p.recipients.length,send_at:at,...(p.flow?{flow:p.flow.id}:{}),...(p.track?{track_links:true}:{})}).run();
+ await audit(env,user.email,'send.schedule',p.system,{id,recipients:p.recipients.length,send_at:at,...(p.flow?{flow:p.flow.id}:{}),...(p.track?{track_links:true}:{}),...(p.from?{sender:p.from.value}:{})}).run();
  return json({id,scheduled:true,send_at:at,recipients:p.recipients.length,skipped:{invalid:p.invalid,duplicates:p.duplicates}});
 }
 // GET /api/scheduled: the user's scheduled sends (admins see everyone's). POST cancel or reschedule while it waits.
 export async function scheduled(request: Request, url: URL, env: Env, user: User): Promise<Response> {
  const admin = user.role === 'admin';
  if (request.method === 'GET') {
-  const rows = await env.DB.prepare(`SELECT s.id,s.email,s.system_number,s.body,json_array_length(s.recipients) AS recipients,s.flow_id,s.track_links,f.name AS flow,s.send_at,s.status,s.progress,s.result,s.created_at FROM scheduled_sends s LEFT JOIN flows f ON f.id=s.flow_id WHERE ${admin ? '1' : 's.email=?'} ORDER BY CASE s.status WHEN 'scheduled' THEN 0 ELSE 1 END,CASE s.status WHEN 'scheduled' THEN s.send_at ELSE -s.send_at END LIMIT 200`).bind(...(admin ? [] : [user.email])).all<{result:string|null}>();
+  const rows = await env.DB.prepare(`SELECT s.id,s.email,s.system_number,s.body,json_array_length(s.recipients) AS recipients,s.flow_id,s.track_links,(SELECT x.value FROM senders x WHERE x.id=s.sender_id) AS sender,f.name AS flow,s.send_at,s.status,s.progress,s.result,s.created_at FROM scheduled_sends s LEFT JOIN flows f ON f.id=s.flow_id WHERE ${admin ? '1' : 's.email=?'} ORDER BY CASE s.status WHEN 'scheduled' THEN 0 ELSE 1 END,CASE s.status WHEN 'scheduled' THEN s.send_at ELSE -s.send_at END LIMIT 200`).bind(...(admin ? [] : [user.email])).all<{result:string|null}>();
   return json({scheduled:rows.results.map(r => ({...r,result:r.result ? JSON.parse(r.result) : null}))});
  }
  const body = await readBody(request); const id = text(body.id,'id',36);
@@ -55,13 +56,16 @@ export async function scheduled(request: Request, url: URL, env: Env, user: User
  }
  throw new HttpError(404,'Not found');
 }
-// POST /api/send/preview {system_number, recipient, body, bulk}: the message as this recipient would get it.
+// POST /api/send/preview {system_number, recipient, body, bulk, sender}: the message as this recipient would get it.
 export async function preview(request: Request, env: Env, user: User): Promise<Response> {
  const body = await readBody(request, 32768); const system = phone(body.system_number); const settings = await loadSettings(env.DB);
  const allowed = user.role === 'admin' ? await env.DB.prepare('SELECT 1 FROM system_numbers WHERE number=? AND active=1').bind(system).first() : await env.DB.prepare('SELECT 1 FROM user_numbers u JOIN system_numbers s ON s.number=u.system_number WHERE u.email=? AND u.system_number=? AND u.can_send=1 AND s.active=1').bind(user.email,system).first();
  if (!allowed) throw new HttpError(403,'Sending from this number is not allowed');
  const message = text(body.body,'message',1000); const n = recipient(body.recipient);
  const contact = await env.DB.prepare('SELECT data FROM contacts WHERE number=?').bind(n).first<{data:string}>();
- let t = render(message,settings.contact_fields,contact ? JSON.parse(contact.data) : null,n); if (body.bulk === true && settings.optout_text && !t.includes(settings.optout_text)) t += '\n' + settings.optout_text;
+ let t = render(message,settings.contact_fields,contact ? JSON.parse(contact.data) : null,n);
+ // With a sender ID (sender:true) the opt-out line is the link text, shown with a sample link.
+ if (body.bulk === true && body.sender === true && settings.optout_link_text) t += '\n' + settings.optout_link_text.replace(OPTOUT_LINK,optoutUrl(settings.link_base,'Q7mP2aK'));
+ else if (body.bulk === true && settings.optout_text && !t.includes(settings.optout_text)) t += '\n' + settings.optout_text;
  return json({body:t,unknown:unknownVariables(message,settings.contact_fields)});
 }

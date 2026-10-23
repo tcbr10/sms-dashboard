@@ -17,7 +17,7 @@ let mf:Miniflare;let env:Env;
 const number='+972501234567',other='+972501234568',peer='+972509876543',token='a'.repeat(40),outToken='b'.repeat(40),message='שלום 👋\n& + "בדיקה" %20';
 beforeAll(async()=>{mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("test")}}',compatibilityDate:'2026-08-06',d1Databases:{DB:'sms-test'}});const bindings=await mf.getBindings();env={DB:bindings.DB as D1Database,INCOMING_TOKEN:token,OUTGOING_TOKEN:outToken};const dir=new URL('../migrations/',import.meta.url);for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(file,dir),'utf8')).split(';').filter(s=>s.trim()))await env.DB.prepare(sql).run();});
 afterAll(async()=>{await mf?.dispose();});
-beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','imports','forward_rules','deliveries','flows','conversations','bot_answers','bot_blocks','scheduled_sends','links','bot_threads','system_numbers'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers (number,label,active) VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
+beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','imports','forward_rules','deliveries','flows','conversations','bot_answers','bot_blocks','scheduled_sends','links','bot_threads','sender_users','senders','optout_codes','system_numbers'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers (number,label,active) VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
 const user=(email:string,role:'admin'|'user'='user'):User=>({email,name:'',role,can_bulk_send:0,daily_limit:null,density:null,columns:null,test_number:null,sessions_revoked_at:null,can_edit_contacts:1});
 const ctx={waitUntil(){},passThroughOnException(){}} as unknown as ExecutionContext;
 function send(body:Record<string,unknown>,out=false,secret=out?outToken:token){return ingestion.fetch(new Request('https://ingest.test'+(out?'/events/outgoing':'/hooks/incoming'),{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+secret},body:JSON.stringify({event_id:'event-1',system_number:number,peer_number:peer,body:message,...body})}),env);}
@@ -575,4 +575,84 @@ describe('bot chats',()=>{
   // A thread starts at the bot's first message, as it does live.
   const times=(await env.DB.prepare("SELECT MIN(CASE WHEN sent_by='בוט' THEN occurred_at END) AS a,MAX(occurred_at) AS b FROM messages").first<{a:number;b:number}>())!;
   expect(row).toEqual({flow_id:id,started_at:times.a,last_at:times.b});});
+});
+describe('sender IDs',()=>{
+ const third='+972509876544',base='https://l.test';
+ type Call={url:string;body:Record<string,unknown>};const calls:Call[]=[];
+ // Fake Micropay: senderVerify answers by number and code; scheduleSms refuses the sender name BadName.
+ const fetcher=async(url:string,init:RequestInit)=>{const body=JSON.parse(String(init.body));calls.push({url,body});
+  if(url.endsWith('senderVerify.php')){const p=String(body.phone);if(p==='0520000000')return new Response('{"status":1,"message":"PHONE_EXIST"}');if(p==='0530000000')return new Response('{"status":0,"message":"MAX_SENT"}');if(p==='035551235')return new Response('ERROR --> Description: phone parameter, must be a valid Israeli phone');
+   return new Response(body.code===undefined?'{"status":1,"message":"CODE_SENT","data":{"remoteIP":"1.2.3.4"}}':body.code==='12345'?'{"status":1,"message":"OK"}':'WRONG_CODE');}
+  return new Response(body.from==='BadName'?'ERROR from parameter, sender id not approved':'OK '+calls.length);};
+ const req=(email:string,path:string,b?:unknown)=>handle(new Request(ORIGIN+path,b===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify(b)}),{...env,MICROPAY_TOKEN:'t'} as Env,email,{fetcher}).catch(failure);
+ const send=(b:Record<string,unknown>,email='alice@example.com')=>req(email,'/api/send',{id:crypto.randomUUID(),system_number:number,recipients:[peer],body:'מבצע',...b});
+ const list=async()=>(await body(req('admin@example.com','/api/admin/senders'))).senders as {id:number;kind:string;value:string;label:string;status:string;users:string[]}[];
+ const addPhone=async(code='12345')=>{await req('admin@example.com','/api/admin/senders/code',{phone:'03-555-1234'});return req('admin@example.com','/api/admin/senders/verify',{phone:'03-555-1234',code,desc:'מוקד'});};
+ const assign=(id:number,users:string[],active=true)=>req('admin@example.com','/api/admin/senders/save',{id,label:'מוקד',active,users});
+ const optout=(code:string,method='GET')=>redirect(new Request(base+'/x/'+code,{method}),env,()=>{});
+ beforeEach(async()=>{calls.length=0;await env.DB.prepare("UPDATE user_numbers SET can_send=1 WHERE email='alice@example.com' AND system_number=?").bind(number).run();await env.DB.prepare("UPDATE users SET can_bulk_send=1 WHERE email='alice@example.com'").run();});
+ it('is managed by admins only',async()=>{for(const [path,b] of [['/api/admin/senders',undefined],['/api/admin/senders/code',{phone:'03-555-1234'}],['/api/admin/senders/name',{name:'Noam'}],['/api/admin/senders/save',{id:1,active:true,users:[]}]] as const)expect((await req('alice@example.com',path,b)).status).toBe(403);
+  expect(calls).toHaveLength(0);});
+ it('verifies a number with the code Micropay sends to it',async()=>{
+  expect(await body(req('admin@example.com','/api/admin/senders/code',{phone:'03-555-1234',type:'vms'}))).toEqual({sent:true});
+  expect(calls[0]).toEqual({url:'https://www.micropay.co.il/extApi/senderVerify.php',body:{token:'t',phone:'035551234',type:'vms'}});expect(await list()).toEqual([]);
+  expect(await body(req('admin@example.com','/api/admin/senders/verify',{phone:'035551234',code:'11111'}))).toEqual({error:'Wrong code'});
+  expect(await body(req('admin@example.com','/api/admin/senders/verify',{phone:'035551234',code:'12345',desc:'מוקד'}))).toEqual({added:true});expect(calls.at(-1)!.body).toEqual({token:'t',phone:'035551234',code:'12345',desc:'מוקד'});
+  expect(await list()).toMatchObject([{kind:'phone',value:'+97235551234',label:'מוקד',status:'verified',users:[]}]);
+  expect((await req('admin@example.com','/api/admin/senders/code',{phone:'035551234'})).status).toBe(409);
+  expect(await body(req('admin@example.com','/api/admin/senders/code',{phone:'0520000000'}))).toEqual({added:true});expect((await list()).map(x=>x.value)).toContain('+972520000000');
+  expect((await req('admin@example.com','/api/admin/senders/code',{phone:'0530000000'})).status).toBe(429);
+  expect(await body(req('admin@example.com','/api/admin/senders/code',{phone:'035551235'}))).toEqual({error:'Micropay refused: phone parameter, must be a valid Israeli phone'});
+  for(const p of ['+447700900123','abc'])expect((await req('admin@example.com','/api/admin/senders/code',{phone:p})).status).toBe(400);
+  expect((await req('admin@example.com','/api/admin/senders/code',{phone:'0541234567',type:'fax'})).status).toBe(400);
+  const log=(await env.DB.prepare("SELECT action,target FROM audit_log WHERE action LIKE 'sender.%' ORDER BY id").all()).results;expect(log).toEqual([{action:'sender.code',target:'+97235551234'},{action:'sender.add',target:'+97235551234'},{action:'sender.add',target:'+972520000000'}]);});
+ it('registers text sender names under Micropay\'s rules',async()=>{for(const n of ['N','TooLongName1','נועם','12345','Noam_Sys'])expect((await req('admin@example.com','/api/admin/senders/name',{name:n})).status).toBe(400);
+  expect(await body(req('admin@example.com','/api/admin/senders/name',{name:'Noam Sys+',desc:'מבצעים'}))).toEqual({added:true});expect((await req('admin@example.com','/api/admin/senders/name',{name:'Noam Sys+'})).status).toBe(409);
+  expect(await list()).toMatchObject([{kind:'name',value:'Noam Sys+',status:'unconfirmed'}]);});
+ it('lets a user send only as the senders an admin assigned to them',async()=>{await addPhone();const id=(await list())[0].id;calls.length=0;
+  expect(((await body(req('alice@example.com','/api/me'))).senders as unknown[])).toEqual([]);expect((await send({sender_id:id})).status).toBe(403);expect(calls).toHaveLength(0);
+  expect((await assign(id,['alice@example.com'])).status).toBe(200);expect((await body(req('alice@example.com','/api/me'))).senders).toEqual([{id,kind:'phone',value:'+97235551234',label:'מוקד',status:'verified'}]);
+  const sid=crypto.randomUUID();expect(await body(send({id:sid,sender_id:id}))).toMatchObject({status:'accepted',sent:1});expect(calls[0].body).toMatchObject({from:'035551234',list:'0509876543',msg:'מבצע'});
+  expect(await env.DB.prepare("SELECT sender FROM messages WHERE direction='out'").first()).toEqual({sender:'+97235551234'});expect(await env.DB.prepare('SELECT sender_id FROM sends WHERE id=?').bind(sid).first()).toEqual({sender_id:id});
+  expect((await read('alice@example.com','?direction=out')).messages[0].sender).toBe('+97235551234');
+  // The user dialog sets the same permission from the user's side.
+  const u=(await body(req('admin@example.com','/api/admin/users'))).users as {email:string;senders:number[]}[];expect(u.find(x=>x.email==='alice@example.com')!.senders).toEqual([id]);
+  expect((await req('admin@example.com','/api/admin/users/save',{email:'alice@example.com',role:'user',active:true,can_bulk_send:true,daily_limit:null,numbers:[{number,can_send:true}],senders:[]})).status).toBe(200);
+  expect((await send({sender_id:id})).status).toBe(403);
+  expect((await req('admin@example.com','/api/admin/users/save',{email:'alice@example.com',role:'user',active:true,can_bulk_send:true,daily_limit:null,numbers:[{number,can_send:true}],senders:[id]})).status).toBe(200);expect((await send({sender_id:id})).status).toBe(200);
+  await assign(id,['alice@example.com'],false);expect((await send({sender_id:id})).status).toBe(403);expect(((await body(req('admin@example.com','/api/me'))).senders as unknown[])).toEqual([]);
+  expect((await send({sender_id:id},'admin@example.com')).status).toBe(403);await assign(id,[]);expect((await send({sender_id:id},'admin@example.com')).status).toBe(200);});
+ it('refuses bot flows, and several recipients until the opt-out link text is set',async()=>{await addPhone();const id=(await list())[0].id;await assign(id,['alice@example.com']);calls.length=0;
+  const flowId=(await body(req('admin@example.com','/api/admin/flows/save',{name:'סקר',system_number:number,trigger:'send',steps:[{id:'s1',type:'end',text:'שלום'}],fallback:'',expire_hours:24,active:true}))).id;
+  expect(await body(send({sender_id:id,flow_id:flowId}))).toEqual({error:'A bot flow can only be sent from the system number'});
+  expect((await send({sender_id:id,recipients:[peer,third]})).status).toBe(400);expect((await send({sender_id:id,test:true,bulk_preview:true})).status).toBe(400);
+  expect((await req('admin@example.com','/api/admin/settings',{optout_link_text:'להסרה'})).status).toBe(400);
+  await req('admin@example.com','/api/admin/settings',{optout_link_text:'להסרה: {קישור}'});expect((await send({sender_id:id,recipients:[peer,third]})).status).toBe(400);
+  await req('admin@example.com','/api/admin/settings',{link_base:base});expect((await send({sender_id:id,recipients:[peer,third]})).status).toBe(200);expect(calls).toHaveLength(2);});
+ it('gives each recipient their own opt-out link, which opts out only when confirmed',async()=>{await addPhone();const id=(await list())[0].id;calls.length=0;
+  await req('admin@example.com','/api/admin/settings',{optout_link_text:'להסרה: {קישור}',optout_text:'להסרה השיבו הסר',link_base:base});
+  expect(await body(send({sender_id:id,recipients:[peer,third]},'admin@example.com'))).toMatchObject({status:'accepted',sent:2});
+  const codes=new Map((await env.DB.prepare('SELECT code,peer_number FROM optout_codes').all<{code:string;peer_number:string}>()).results.map(r=>[r.peer_number,r.code]));expect(codes.size).toBe(2);
+  expect(calls.map(c=>c.body.msg).sort()).toEqual(['מבצע\r\nלהסרה: '+base+'/x/'+codes.get(peer),'מבצע\r\nלהסרה: '+base+'/x/'+codes.get(third)].sort());
+  calls.length=0;await send({sender_id:id,recipients:[peer,third]},'admin@example.com');expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM optout_codes').first<{n:number}>())!.n).toBe(2);expect(calls.map(c=>String(c.body.msg)).join()).toContain('/x/'+codes.get(peer));
+  // Without a sender ID the usual text is added, with no link.
+  calls.length=0;await send({recipients:[peer,third]},'admin@example.com');expect(calls[0].body.msg).toBe('מבצע\r\nלהסרה השיבו הסר');
+  const page=await optout(codes.get(peer)!);expect(page.status).toBe(200);const html=await page.text();expect(html).toContain('<form method="post">');expect(html).toContain('6543');expect(html).not.toContain('0509876543');
+  expect(await env.DB.prepare('SELECT 1 FROM opt_outs').first()).toBeNull();expect((await optout(codes.get(peer)!,'HEAD')).status).toBe(200);expect(await env.DB.prepare('SELECT 1 FROM opt_outs').first()).toBeNull();
+  expect((await optout(codes.get(peer)!,'POST')).status).toBe(200);expect(await env.DB.prepare('SELECT number,source FROM opt_outs').all()).toMatchObject({results:[{number:peer,source:'link'}]});
+  expect(await (await optout(codes.get(peer)!)).text()).toContain('כבר הוסר');expect((await optout('ZZZZZZZ')).status).toBe(404);expect((await optout('ZZZZZZZ','POST')).status).toBe(404);
+  calls.length=0;expect(await body(send({sender_id:id,recipients:[peer,third]},'admin@example.com'))).toMatchObject({sent:1,skipped:{opted_out:1}});
+  calls.length=0;await req('admin@example.com','/api/admin/settings',{micropay_listjson:true});await send({sender_id:id,recipients:[third,'+972509876545']},'admin@example.com');
+  expect(calls).toHaveLength(1);expect(calls[0].body.from).toBe('035551234');expect(Object.keys(calls[0].body.listjson as object)).toEqual(['0509876544','0509876545']);});
+ it('confirms a text name by its first accepted send, or marks it rejected',async()=>{await req('admin@example.com','/api/admin/senders/name',{name:'NoamSys'});await req('admin@example.com','/api/admin/senders/name',{name:'BadName'});
+  const ids=Object.fromEntries((await list()).map(x=>[x.value,x.id]));
+  expect(await body(send({sender_id:ids.NoamSys},'admin@example.com'))).toMatchObject({status:'accepted'});expect(calls.at(-1)!.body.from).toBe('NoamSys');
+  expect(await body(send({sender_id:ids.BadName},'admin@example.com'))).toMatchObject({status:'rejected'});
+  expect(Object.fromEntries((await list()).map(x=>[x.value,x.status]))).toEqual({NoamSys:'confirmed',BadName:'rejected'});
+  expect(((await body(req('admin@example.com','/api/me'))).senders as {value:string}[]).map(x=>x.value)).toEqual(['NoamSys']);expect((await send({sender_id:ids.BadName},'admin@example.com')).status).toBe(403);});
+ it('checks the permission again when a scheduled send goes out',async()=>{await addPhone();const id=(await list())[0].id;await assign(id,['alice@example.com']);calls.length=0;
+  expect(await body(send({sender_id:id,send_at:Date.now()+3600000}))).toMatchObject({scheduled:true});
+  expect(((await body(req('alice@example.com','/api/scheduled'))).scheduled as {sender:string}[])[0].sender).toBe('+97235551234');
+  await assign(id,[]);await env.DB.prepare('UPDATE scheduled_sends SET send_at=1').run();expect(await runScheduled({...env,MICROPAY_TOKEN:'t'},fetcher)).toBe(true);
+  expect(calls).toHaveLength(0);const row=await env.DB.prepare('SELECT status,result FROM scheduled_sends').first<{status:string;result:string}>();expect(row!.status).toBe('failed');expect(JSON.parse(row!.result).error).toBe('This sender ID is not available to you');});
 });

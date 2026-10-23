@@ -50,6 +50,7 @@ const userDialog = String.raw`
  <label class="fld"><span>מספר לבדיקה</span><input id="ud-test" class="phone" dir="ltr" maxlength="20" placeholder="לא הוגדר"></label>
  <div class="row"><label class="check"><input type="checkbox" id="ud-active">משתמש פעיל</label><label class="check"><input type="checkbox" id="ud-bulk">שליחה לכמה נמענים וייבוא מקובץ</label><label class="check"><input type="checkbox" id="ud-contacts">עריכת פרטי לקוחות</label></div>
  <div class="fld"><span class="label">גישה למספרים</span><p class="hint" id="ud-admin-note" hidden>למנהלים יש גישה מלאה לכל המספרים, ללא מגבלת שליחה.</p><div class="perm" id="ud-perms"></div></div>
+ <div class="fld" id="ud-senders-row" hidden><span class="label">זיהוי שולח מורשה</span><p class="hint" id="ud-senders-admin" hidden>מנהלים יכולים לשלוח בשם כל השולחים.</p><div class="perm" id="ud-senders"></div></div>
  <p class="hint">המשתמש נכנס עם קוד חד-פעמי שנשלח לכתובת האימייל שלו.</p>
  <div class="banner" id="ud-error" role="alert" hidden></div>
  <div class="dialog-foot"><button type="button" class="ghost danger" id="ud-delete">מחיקת המשתמש</button><button type="button" class="ghost danger" id="ud-disconnect">ניתוק החיבור</button><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="ud-save">שמירה</button></div>
@@ -139,9 +140,44 @@ const userDialog = String.raw`
  <div class="dialog-foot"><span class="hint" id="ci-status"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="ci-go">ייבוא</button></div>
 </form></dialog>
 `;
+// Sender IDs: add a number (code sent by Micropay, then typed back), add a text name, and edit who may use one.
+const senderDialogs = String.raw`
+<dialog id="sp-dlg" aria-labelledby="sp-title"><form class="dialog-body" id="sp-form" novalidate>
+ <div class="dialog-head"><h2 id="sp-title">הוספת מספר שולח</h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <div id="sp-step1" class="fld">
+  <p class="hint">מיקרופיי ישלח קוד אימות למספר, ומי שעונה בו צריך למסור לך את הקוד. אפשר להוסיף רק מספר ישראלי, נייד או נייח (לא 1700 או 1800). מספר שכבר אומת בחשבון המיקרופיי יתווסף מיד, בלי קוד.</p>
+  <div class="grid2"><label class="fld"><span>מספר טלפון</span><input id="sp-phone" class="phone" dir="ltr" maxlength="20" placeholder="03-555-1234"></label><label class="fld"><span>איך לשלוח את הקוד</span><select id="sp-type"><option value="auto">אוטומטי (שיחה לנייח, SMS לנייד)</option><option value="sms">SMS</option><option value="vms">שיחה קולית</option></select></label></div>
+  <label class="fld"><span>תיאור</span><input id="sp-desc" maxlength="50" placeholder="לדוגמה: מוקד"></label>
+ </div>
+ <div id="sp-step2" class="fld" hidden>
+  <p class="hint" id="sp-sent"></p>
+  <label class="fld"><span>קוד אימות</span><input id="sp-code" class="phone" inputmode="numeric" dir="ltr" maxlength="8" autocomplete="one-time-code"></label>
+  <div class="row"><button type="button" class="ghost" id="sp-resend">שליחת קוד חדש</button><span class="hint">עד 2 קודים ב-SMS ו-2 בשיחה למספר ב-15 דקות.</span></div>
+ </div>
+ <div class="banner" id="sp-error" role="alert" hidden></div>
+ <div class="dialog-foot"><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="sp-go">שליחת קוד</button></div>
+</form></dialog>
+<dialog id="sn-dlg" aria-labelledby="sn-title"><form class="dialog-body" id="sn-form" novalidate>
+ <div class="dialog-head"><h2 id="sn-title">הוספת שם שולח</h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <p class="hint">לשם שולח אין אימות בקוד: הוא צריך להיות מאושר קודם באתר מיקרופיי. כאן רק רושמים אותו. השליחה הראשונה בשמו תאשר אותו, או תסמן אותו כנדחה אם מיקרופיי לא אישר. לשם שולח אי אפשר להשיב.</p>
+ <div class="grid2"><label class="fld"><span>שם השולח</span><input id="sn-name" dir="ltr" maxlength="11" placeholder="NoamSys"></label><label class="fld"><span>תיאור</span><input id="sn-desc" maxlength="50"></label></div>
+ <p class="hint">2 עד 11 תווים: אותיות באנגלית, ספרות, רווח, + ו-*, ולפחות אות אחת.</p>
+ <div class="banner" id="sn-error" role="alert" hidden></div>
+ <div class="dialog-foot"><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn">הוספה</button></div>
+</form></dialog>
+<dialog id="se-dlg" aria-labelledby="se-title"><form class="dialog-body" id="se-form" novalidate>
+ <div class="dialog-head"><h2 id="se-title" class="phone"></h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <p class="hint" id="se-status"></p>
+ <label class="fld"><span>תיאור</span><input id="se-label" maxlength="50"></label>
+ <label class="check"><input type="checkbox" id="se-active">פעיל (אפשר לבחור אותו בשליחה)</label>
+ <div class="fld"><span class="label">משתמשים שרשאים לשלוח בשמו</span><p class="hint">מנהלים יכולים לשלוח בשם כל השולחים. משתמש צריך גם הרשאת שליחה מהמספר שממנו הוא שולח.</p><div class="perm" id="se-users"></div></div>
+ <div class="banner" id="se-error" role="alert" hidden></div>
+ <div class="dialog-foot"><button type="button" class="ghost danger" id="se-delete">הסרת השולח</button><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn">שמירה</button></div>
+</form></dialog>
+`;
 const body = header('admin',false) + String.raw`
 <main class="wrap">
- <nav class="tabs" role="tablist" aria-label="ניהול"><button type="button" role="tab" data-tab="users">משתמשים</button><button type="button" role="tab" data-tab="numbers">מספרים</button><button type="button" role="tab" data-tab="contacts">אנשי קשר</button><button type="button" role="tab" data-tab="optouts">רשימת הסרה</button><button type="button" role="tab" data-tab="imports">ייבוא הודעות</button><button type="button" role="tab" data-tab="bot">בוט</button><button type="button" role="tab" data-tab="forwards">העברה ל-Webhook</button><button type="button" role="tab" data-tab="settings">הגדרות</button><button type="button" role="tab" data-tab="audit">יומן פעולות</button></nav>
+ <nav class="tabs" role="tablist" aria-label="ניהול"><button type="button" role="tab" data-tab="users">משתמשים</button><button type="button" role="tab" data-tab="numbers">מספרים</button><button type="button" role="tab" data-tab="senders">זיהוי שולח</button><button type="button" role="tab" data-tab="contacts">אנשי קשר</button><button type="button" role="tab" data-tab="optouts">רשימת הסרה</button><button type="button" role="tab" data-tab="imports">ייבוא הודעות</button><button type="button" role="tab" data-tab="bot">בוט</button><button type="button" role="tab" data-tab="forwards">העברה ל-Webhook</button><button type="button" role="tab" data-tab="settings">הגדרות</button><button type="button" role="tab" data-tab="audit">יומן פעולות</button></nav>
  <div class="banner panel" id="error" role="alert" hidden><span id="error-text"></span></div>
  <section class="panel" data-panel="users" hidden>
   <div class="toolbar"><label class="field search">`+svg('search')+String.raw`<input id="u-q" type="search" placeholder="חיפוש לפי שם או אימייל" aria-label="חיפוש משתמשים"></label><span class="hint end" id="u-access" hidden></span><button type="button" class="ghost" id="u-access-sync" hidden>סנכרון עם Cloudflare</button><button type="button" class="btn" id="u-add">`+svg('plus')+String.raw`הוספת משתמש</button></div>
@@ -150,6 +186,11 @@ const body = header('admin',false) + String.raw`
  <section class="panel" data-panel="numbers" hidden>
   <div class="toolbar"><span class="hint">מספר חדש צריך גם שירות טקסט דינמי במיקרופיי שמפנה לכתובת הקליטה.</span><button type="button" class="btn end" id="n-add">`+svg('plus')+String.raw`הוספת מספר</button></div>
   <div class="table-wrap"><table class="list"><thead><tr><th><span>שם תצוגה</span></th><th><span>מספר</span></th><th><span>סטטוס</span></th><th><span>משתמשים משויכים</span></th></tr></thead><tbody id="n-rows"></tbody></table></div>
+ </section>
+ <section class="panel" data-panel="senders" hidden>
+  <div class="toolbar"><span class="hint">מה שהנמען רואה כשולח במקום מספר המערכת. רק מנהלים מוסיפים ומאמתים שולחים, ובוחרים מי מהמשתמשים רשאי לשלוח בשם כל אחד.</span><button type="button" class="ghost end" id="sd-add-name">הוספת שם שולח</button><button type="button" class="btn" id="sd-add-phone">`+svg('plus')+String.raw`הוספת מספר שולח</button></div>
+  <div class="table-wrap"><table class="list"><thead><tr><th><span>שולח</span></th><th><span>סוג</span></th><th><span>תיאור</span></th><th><span>מצב</span></th><th><span>משתמשים מורשים</span></th></tr></thead><tbody id="sd-rows"></tbody></table></div>
+  <div class="foot"><span></span><span>תשובות לשולח כזה לא מגיעות למערכת, לכן אי אפשר להתחיל ממנו תהליך בוט, ובשליחה לכמה נמענים מתווסף קישור הסרה אישי במקום "השיבו הסר".</span></div>
  </section>
  <section class="panel" data-panel="contacts" hidden>
   <div class="toolbar"><label class="field search">`+svg('search')+String.raw`<input id="c-q" type="search" placeholder="חיפוש לפי מספר או פרטים" aria-label="חיפוש אנשי קשר"></label><label class="ghost end" id="c-import-btn">`+svg('file')+String.raw`ייבוא מקובץ<input type="file" id="c-file" accept=".csv,.txt,.xlsx" hidden></label><button type="button" class="ghost" id="c-fields">`+svg('columns')+String.raw`ניהול שדות</button><button type="button" class="btn" id="c-add">`+svg('plus')+String.raw`הוספת איש קשר</button></div>
@@ -182,6 +223,7 @@ const body = header('admin',false) + String.raw`
    <div class="grid2"><label class="fld"><span>עדכון חי כל (שניות)</span><input type="number" id="s-refresh" min="3" max="60"></label><label class="fld"><span>מקסימום נמענים בשליחה אחת</span><input type="number" id="s-max" min="1" max="5000"></label></div>
    <div class="grid2"><label class="fld"><span>מגבלת נמענים ל-24 שעות (ברירת מחדל)</span><input type="number" id="s-daily" min="0" max="100000"></label><label class="fld"><span>מילות הסרה</span><input id="s-keywords" placeholder="הסר, הסרה, STOP"></label></div>
    <label class="fld"><span>טקסט הסרה שמתווסף לשליחה לכמה נמענים</span><input id="s-optout" maxlength="120" placeholder="לדוגמה: להסרה השיבו הסר"></label>
+   <label class="fld"><span>טקסט קישור הסרה (בשליחה בשם שולח)</span><input id="s-optout-link" maxlength="120" placeholder="להסרה: {קישור}"><span class="hint">מתווסף במקום טקסט ההסרה כששולחים לכמה נמענים בשם שולח, שלא תמיד אפשר להשיב לו. {קישור} מוחלף בקישור הסרה אישי לכל נמען (דורש כתובת קישורים מקוצרים). בלי הטקסט הזה אפשר לשלוח בשם שולח רק לנמען אחד.</span></label>
    <label class="check"><input type="checkbox" id="s-intl">לאפשר שליחה למספרים מחוץ לישראל</label>
    <div class="fld"><label class="check"><input type="checkbox" id="s-listjson">הודעות אישיות (עם משתנים) בקריאה אחת למיקרופיי</label><p class="hint">במקום קבוצות של 40 נמענים, כל ההודעות האישיות נשלחות בבקשה אחת (listjson). לפני ההפעלה כדאי לשלוח הודעת בדיקה עם משתנה למספר שלכם ולוודא שהגיעה נכון.</p></div>
    <label class="fld"><span>כתובת הקישורים המקוצרים</span><input id="s-links" dir="ltr" maxlength="60" placeholder="https://l.example.co.il"><span class="hint">הכתובת של Worker הקישורים (sms-links). כשהיא מוגדרת, אפשר לסמן בחלון השליחה "קיצור ומעקב קישורים" ולראות מי לחץ. כדאי כתובת קצרה, כי היא נכנסת לכל הודעה. ריק: האפשרות כבויה.</span></label>
@@ -195,25 +237,25 @@ const body = header('admin',false) + String.raw`
   <div class="more-row" id="a-more-row" hidden><button type="button" class="ghost" id="a-more">טעינת רשומות נוספות</button></div></div>
  </section>
 </main>
-`+userDialog;
+`+userDialog+senderDialogs;
 const script = String.raw`
-const TABS=['users','numbers','contacts','optouts','imports','bot','forwards','settings','audit'];
-const ACTIONS={'user.create':'משתמש נוסף','user.update':'משתמש עודכן','user.delete':'משתמש נמחק','number.create':'מספר נוסף','number.update':'מספר עודכן','settings.update':'ההגדרות עודכנו','optout.add':'נוספו לרשימת ההסרה','optout.remove':'הוסר מרשימת ההסרה','send':'שליחת הודעה','export':'ייצוא הודעות','user.disconnect':'ניתוק משתמש','user.logout':'התנתקות','access.sync':'סנכרון Cloudflare Access','messages.import':'ייבוא הודעות','send.schedule':'שליחה תוזמנה','send.cancel':'שליחה מתוזמנת בוטלה','send.reschedule':'מועד שליחה שונה','flow.save':'תהליך בוט נשמר','flow.delete':'תהליך בוט נמחק','bot.block':'הבוט הושבת ללקוח','bot.unblock':'הבוט הופעל מחדש ללקוח','forward.save':'כלל העברה נשמר','forward.delete':'כלל העברה נמחק','forward.test':'בדיקת Webhook','forward.secret':'מפתח חתימה הוחלף','forward.resend':'שליחה מחדש ל-Webhook','messages.import.undo':'ביטול ייבוא הודעות','contact.save':'איש קשר נשמר','contact.delete':'איש קשר נמחק','contacts.import':'ייבוא אנשי קשר','list.save':'רשימת תפוצה נשמרה','list.delete':'רשימת תפוצה נמחקה'};
+const TABS=['users','numbers','senders','contacts','optouts','imports','bot','forwards','settings','audit'];
+const ACTIONS={'sender.add':'שולח נוסף','sender.update':'שולח עודכן','sender.delete':'שולח הוסר','sender.code':'נשלח קוד אימות לשולח','user.create':'משתמש נוסף','user.update':'משתמש עודכן','user.delete':'משתמש נמחק','number.create':'מספר נוסף','number.update':'מספר עודכן','settings.update':'ההגדרות עודכנו','optout.add':'נוספו לרשימת ההסרה','optout.remove':'הוסר מרשימת ההסרה','send':'שליחת הודעה','export':'ייצוא הודעות','user.disconnect':'ניתוק משתמש','user.logout':'התנתקות','access.sync':'סנכרון Cloudflare Access','messages.import':'ייבוא הודעות','send.schedule':'שליחה תוזמנה','send.cancel':'שליחה מתוזמנת בוטלה','send.reschedule':'מועד שליחה שונה','flow.save':'תהליך בוט נשמר','flow.delete':'תהליך בוט נמחק','bot.block':'הבוט הושבת ללקוח','bot.unblock':'הבוט הופעל מחדש ללקוח','forward.save':'כלל העברה נשמר','forward.delete':'כלל העברה נמחק','forward.test':'בדיקת Webhook','forward.secret':'מפתח חתימה הוחלף','forward.resend':'שליחה מחדש ל-Webhook','messages.import.undo':'ביטול ייבוא הודעות','contact.save':'איש קשר נשמר','contact.delete':'איש קשר נמחק','contacts.import':'ייבוא אנשי קשר','list.save':'רשימת תפוצה נשמרה','list.delete':'רשימת תפוצה נמחקה'};
 const SEND_STATUS={accepted:'התקבלה',rejected:'נדחתה',unknown:'לא ידוע',sending:'בשליחה'};
-let USERS=[],NUMBERS=[],SETTINGS=null,OPTOUTS=[],CONTACTS=[],auditBefore=null,importRows=null,importMode='update';
+let USERS=[],NUMBERS=[],SENDERS=[],SETTINGS=null,OPTOUTS=[],CONTACTS=[],auditBefore=null,importRows=null,importMode='update';
 function error(e){$('error').hidden=false;$('error-text').textContent=message(e);}
 function dlgError(id,e){$(id).hidden=false;$(id).textContent=message(e);}
 function cell(text,cls){return el('td',cls,text);}
 function seen(ms){return ms?shortFmt.format(ms):'טרם התחבר';}
 function showTab(t){if(!TABS.includes(t))t='users';for(const b of document.querySelectorAll('[data-tab]'))b.setAttribute('aria-selected',String(b.dataset.tab===t));
  for(const p of document.querySelectorAll('[data-panel]'))p.hidden=p.dataset.panel!==t;if(location.hash!=='#'+t)history.replaceState(null,'','#'+t);$('error').hidden=true;
- ({users:loadUsers,numbers:loadNumbers,contacts:loadContacts,optouts:loadOptouts,imports:loadImports,bot:loadFlows,forwards:loadForwards,settings:loadSettings,audit:function(){return loadAudit(true);}})[t]().catch(error);}
+ ({users:loadUsers,numbers:loadNumbers,senders:loadSenders,contacts:loadContacts,optouts:loadOptouts,imports:loadImports,bot:loadFlows,forwards:loadForwards,settings:loadSettings,audit:function(){return loadAudit(true);}})[t]().catch(error);}
 for(const b of document.querySelectorAll('[data-tab]'))b.addEventListener('click',function(){showTab(b.dataset.tab);});
 for(const b of document.querySelectorAll('[data-close]'))b.addEventListener('click',function(){b.closest('dialog').close();});
 // Connected: seen in the last two minutes and not disconnected since.
 function online(u){return u.active&&u.last_seen_at&&Date.now()-u.last_seen_at<120000&&!(u.sessions_revoked_at&&u.sessions_revoked_at>u.last_seen_at);}
 
-async function loadUsers(){const r=await Promise.all([get('/api/admin/users'),get('/api/admin/numbers'),get('/api/admin/settings')]);USERS=r[0].users;NUMBERS=r[1].numbers;SETTINGS=r[2];renderUsers();renderAccess(r[0].access);}
+async function loadUsers(){const r=await Promise.all([get('/api/admin/users'),get('/api/admin/numbers'),get('/api/admin/settings'),get('/api/admin/senders')]);USERS=r[0].users;NUMBERS=r[1].numbers;SETTINGS=r[2];SENDERS=r[3].senders;renderUsers();renderAccess(r[0].access);}
 // Cloudflare Access sync: the last result, and a manual sync for when an automatic one failed.
 function renderAccess(a){const on=!!(a&&a.configured);$('u-access').hidden=$('u-access-sync').hidden=!on;if(!on)return;const l=a.last;
  $('u-access').textContent=!l?'Cloudflare Access: עדיין לא סונכרן':l.ok?'Cloudflare Access סונכרן '+shortFmt.format(l.at)+' · '+plural(l.emails,'משתמש אחד','משתמשים'):'סנכרון Cloudflare Access נכשל ('+shortFmt.format(l.at)+'): '+l.error;$('u-access').className='hint end'+(l&&!l.ok?' bad':'');}
@@ -239,6 +281,9 @@ function openUser(email){const u=email?USERS.find(function(x){return x.email===e
   const rb=el('button','ghost','הגבלות');rb.type='button';rb.addEventListener('click',function(){openRestrict(n);});const note=el('span','perm-note');note.dataset.note=n.number;
   const end=el('span','perm-end');end.append(rb,sel);row.append(name,end,note);perms.append(row);const sync=function(){rb.disabled=!sel.value;note.textContent=sel.value?restrictSummary(UD.get(n.number)):'';};sel.addEventListener('change',sync);sync();}
  if(!NUMBERS.length)perms.append(el('p','hint','עדיין לא הוגדרו מספרים.'));
+ const sb=$('ud-senders');sb.replaceChildren();$('ud-senders-row').hidden=!SENDERS.length;
+ for(const x of SENDERS){const lab=el('label','check');const cb=el('input');cb.type='checkbox';cb.value=String(x.id);cb.checked=!!u&&(u.senders||[]).includes(x.id);const name=el('span','',senderText(x));if(x.kind==='phone')name.className='phone';
+  lab.append(cb,name,el('span','muted',(x.label?' · '+x.label:'')+(x.active?'':' (לא פעיל)')+(x.status==='rejected'?' (נדחה)':'')));sb.append(lab);}
  $('ud-delete').hidden=$('ud-disconnect').hidden=!u||u.email===ME.email;$('ud-error').hidden=true;roleChanged();$('user-dlg').showModal();(u?$('ud-name'):$('ud-email')).focus();}
 // View restrictions per number: messages from a date onward, and only those matching every condition.
 let UD=new Map(),RS=null;
@@ -266,7 +311,7 @@ function updateNote(number){const note=document.querySelector('[data-note="'+num
 $('rs-form').addEventListener('submit',function(e){e.preventDefault();for(const r of RS.rules)if(r.type!=='direction'&&!String(r.value||'').trim()){dlgError('rs-error',new Error('לכל תנאי צריך ערך'));return;}
  const d=$('rs-date').value;const from=d?israelTime(d,$('rs-time').value||'00:00'):null;const rules=RS.rules.map(function(r){return r.type==='direction'?{type:'direction',value:r.value}:r.type==='text'?{type:'text',value:r.value.trim()}:r.type==='answer'?{type:'answer',op:r.op||'eq',value:r.value.trim()}:{type:'field',field:r.field,op:r.op||'eq',value:r.value.trim()};});
  if(from===null&&!rules.length)UD.delete(RS.number);else UD.set(RS.number,{view_from:from,view_rules:rules});updateNote(RS.number);$('rs-dlg').close();toast('ההגבלות יישמרו בלחיצה על "שמירה" בחלון המשתמש');});
-function roleChanged(){const admin=$('ud-role').value==='admin';$('ud-admin-note').hidden=!admin;$('ud-perms').hidden=admin;$('ud-bulk').disabled=admin;$('ud-contacts').disabled=admin;$('ud-limit').disabled=admin;}
+function roleChanged(){const admin=$('ud-role').value==='admin';$('ud-senders').hidden=admin;$('ud-senders-admin').hidden=!admin;$('ud-admin-note').hidden=!admin;$('ud-perms').hidden=admin;$('ud-bulk').disabled=admin;$('ud-contacts').disabled=admin;$('ud-limit').disabled=admin;}
 $('ud-role').addEventListener('change',roleChanged);
 $('u-q').addEventListener('input',renderUsers);
 $('u-add').addEventListener('click',function(){openUser(null);});
@@ -277,7 +322,7 @@ $('ud-form').addEventListener('submit',async function(e){e.preventDefault();cons
  const test=$('ud-test').value.trim();if(test&&!normalize(test)){dlgError('ud-error',new Error('מספר הבדיקה אינו תקין'));return;}
  const numbers=[];for(const s of $('ud-perms').querySelectorAll('select'))if(s.value){const r=UD.get(s.dataset.number);numbers.push({number:s.dataset.number,can_send:s.value==='send',view_from:r?r.view_from:null,view_rules:r&&r.view_rules.length?r.view_rules:null});}
  $('ud-save').disabled=true;
- try{const d=await post('/api/admin/users/save',{create:!editing,email:$('ud-email').value.trim(),name:$('ud-name').value,role:$('ud-role').value,active:$('ud-active').checked,can_bulk_send:$('ud-bulk').checked,can_edit_contacts:$('ud-contacts').checked,daily_limit:limit===''?null:Number(limit),test_number:test?normalize(test):null,numbers:numbers});
+ try{const d=await post('/api/admin/users/save',{create:!editing,email:$('ud-email').value.trim(),name:$('ud-name').value,role:$('ud-role').value,active:$('ud-active').checked,can_bulk_send:$('ud-bulk').checked,can_edit_contacts:$('ud-contacts').checked,daily_limit:limit===''?null:Number(limit),test_number:test?normalize(test):null,numbers:numbers,senders:Array.from($('ud-senders').querySelectorAll('input:checked')).map(function(x){return Number(x.value);})});
   $('user-dlg').close();accessResult(editing?'המשתמש עודכן':'המשתמש נוסף',d.access);await loadUsers();}
  catch(err){dlgError('ud-error',err);}finally{$('ud-save').disabled=false;}});
 $('ud-delete').addEventListener('click',async function(){const email=$('ud-email').value;$('user-dlg').close();
@@ -287,6 +332,50 @@ $('ud-disconnect').addEventListener('click',async function(){const email=$('ud-e
  const a=await confirmAction('ניתוק משתמש','לנתק את '+email+'? החיבור הנוכחי שלו יסתיים מיד והוא יצטרך להתחבר מחדש עם קוד חד-פעמי.','ניתוק','וגם להשבית את המשתמש, כדי שלא יוכל להתחבר שוב');if(!a)return;
  try{const d=await post('/api/admin/users/disconnect',{email:email,disable:a.checked});accessResult(a.checked?'המשתמש נותק והושבת':'המשתמש נותק',d.access);await loadUsers();}catch(err){error(err);}});
 
+// Sender IDs (admins only on the server too): a number verified by a code from Micropay, or a text name approved in
+// Micropay's site. Each one lists the users allowed to send as it.
+const SENDER_STATUS={verified:['אומת בקוד',''],unconfirmed:['טרם נבדק בשליחה',''],confirmed:['אושר בשליחה',''],rejected:['מיקרופיי דחה: השם לא מאושר',' off']};
+const SENDER_ERRORS={'Wrong code':'הקוד שגוי. בדקו אותו ונסו שוב.','Too many codes for this number; wait 15 minutes':'נשלחו יותר מדי קודים למספר הזה. אפשר לנסות שוב בעוד 15 דקות.','This number is already a sender ID':'המספר כבר מוגדר כשולח.','Only Israeli numbers can be sender IDs':'אפשר להוסיף רק מספר ישראלי.','This sender name already exists':'השם כבר קיים.','Sending is not configured':'חסר טוקן מיקרופיי (MICROPAY_TOKEN).'};
+function senderError(id,e){const m=e&&e.message||'';dlgError(id,SENDER_ERRORS[m]?new Error(SENDER_ERRORS[m]):/^A sender name/.test(m)?new Error('השם צריך 2 עד 11 תווים באנגלית, ספרות, רווח, + או *, ולפחות אות אחת.'):e);}
+function senderText(x){return x.kind==='phone'?local(x.value):x.value;}
+async function loadSenders(){const r=await Promise.all([get('/api/admin/senders'),get('/api/admin/users')]);SENDERS=r[0].senders;USERS=r[1].users;renderSenders();}
+function renderSenders(){const body=$('sd-rows');body.replaceChildren();
+ for(const x of SENDERS){const tr=el('tr','click');tr.tabIndex=0;tr.dataset.sender=String(x.id);const who=el('td');who.append(el('span',x.kind==='phone'?'phone':'',senderText(x)));
+  const st=el('td');const s=SENDER_STATUS[x.status]||[x.status,''];st.append(el('span','tag'+s[1],s[0]));if(!x.active)st.append(' ',el('span','tag off','לא פעיל'));
+  const users=x.users.map(function(e){const u=USERS.find(function(y){return y.email===e;});return u&&u.name||e;});
+  tr.append(who,cell(x.kind==='phone'?'מספר':'שם טקסט'),cell(x.label||'—',x.label?'':'muted'),st,cell(users.length?users.join(', '):'מנהלים בלבד',users.length?'':'muted'));body.append(tr);}
+ if(!SENDERS.length){const tr=el('tr');const td=cell('עדיין לא הוגדרו שולחים. הוסיפו מספר שולח (אימות בקוד) או שם שולח שאושר במיקרופיי.','muted');td.colSpan=5;tr.append(td);body.append(tr);}}
+$('sd-rows').addEventListener('click',function(e){const tr=e.target.closest('tr[data-sender]');if(tr)openSender(Number(tr.dataset.sender));});
+$('sd-rows').addEventListener('keydown',function(e){const tr=e.target.closest('tr[data-sender]');if(tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openSender(Number(tr.dataset.sender));}});
+let SP=null;
+$('sd-add-phone').addEventListener('click',function(){SP=null;for(const id of ['sp-phone','sp-desc','sp-code'])$(id).value='';$('sp-type').value='auto';$('sp-step1').hidden=false;$('sp-step2').hidden=true;$('sp-go').textContent='שליחת קוד';$('sp-error').hidden=true;$('sp-dlg').showModal();$('sp-phone').focus();});
+async function sendCode(){const n=normalize($('sp-phone').value);if(!n){dlgError('sp-error',new Error('המספר אינו תקין'));return;}const type=$('sp-type').value;
+ const d=await post('/api/admin/senders/code',{phone:n,type:type,desc:$('sp-desc').value.trim()});
+ if(d.added){$('sp-dlg').close();toast(local(n)+' כבר אומת במיקרופיי ונוסף כשולח');await loadSenders();return;}
+ SP={phone:n};$('sp-step1').hidden=true;$('sp-step2').hidden=false;$('sp-go').textContent='אימות';$('sp-code').value='';
+ $('sp-sent').textContent='קוד נשלח ל-'+local(n)+(type==='sms'?' ב-SMS':type==='vms'?' בשיחה קולית':'')+'. מי שעונה במספר הזה צריך למסור לך את הקוד.';$('sp-code').focus();}
+$('sp-form').addEventListener('submit',async function(e){e.preventDefault();$('sp-error').hidden=true;const b=$('sp-go');b.disabled=true;
+ try{if(!SP){await sendCode();return;}const code=$('sp-code').value.trim();if(!/^[0-9]{3,8}$/.test(code)){dlgError('sp-error',new Error('יש להקליד את הקוד שהתקבל (ספרות בלבד)'));return;}
+  await post('/api/admin/senders/verify',{phone:SP.phone,code:code,desc:$('sp-desc').value.trim()});$('sp-dlg').close();toast(local(SP.phone)+' אומת ונוסף כשולח. עכשיו אפשר לבחור מי רשאי לשלוח בשמו.');await loadSenders();
+  const added=SENDERS.find(function(x){return x.value===SP.phone;});if(added)openSender(added.id);}
+ catch(err){senderError('sp-error',err);}finally{b.disabled=false;}});
+$('sp-resend').addEventListener('click',async function(){const b=this;b.disabled=true;$('sp-error').hidden=true;try{SP=null;await sendCode();if(SP)toast('נשלח קוד חדש');}catch(err){senderError('sp-error',err);}finally{b.disabled=false;}});
+$('sd-add-name').addEventListener('click',function(){$('sn-name').value='';$('sn-desc').value='';$('sn-error').hidden=true;$('sn-dlg').showModal();$('sn-name').focus();});
+$('sn-form').addEventListener('submit',async function(e){e.preventDefault();$('sn-error').hidden=true;
+ try{await post('/api/admin/senders/name',{name:$('sn-name').value.trim(),desc:$('sn-desc').value.trim()});$('sn-dlg').close();toast('השם נוסף. שליחת בדיקה בשמו תאשר שמיקרופיי מכיר אותו.');await loadSenders();
+  const added=SENDERS.find(function(x){return x.value===$('sn-name').value.trim();});if(added)openSender(added.id);}
+ catch(err){senderError('sn-error',err);}});
+let SE=null;
+function openSender(id){const x=SENDERS.find(function(y){return y.id===id;});if(!x)return;SE=x;$('se-title').textContent=senderText(x);
+ $('se-status').textContent=(x.kind==='phone'?'מספר שולח':'שם שולח')+' · '+(SENDER_STATUS[x.status]||[x.status])[0]+' · נוסף על ידי '+x.created_by+' ב-'+shortFmt.format(x.created_at);
+ $('se-label').value=x.label;$('se-active').checked=!!x.active;const box=$('se-users');box.replaceChildren();const users=USERS.filter(function(u){return u.role!=='admin';});
+ for(const u of users){const lab=el('label','check');const cb=el('input');cb.type='checkbox';cb.value=u.email;cb.checked=x.users.includes(u.email);lab.append(cb,u.name?u.name+' · ':'',el('span','muted',u.email));if(!u.active)lab.append(el('span','muted',' (מושבת)'));box.append(lab);}
+ if(!users.length)box.append(el('p','hint','אין משתמשים שאינם מנהלים.'));$('se-error').hidden=true;$('se-dlg').showModal();}
+$('se-form').addEventListener('submit',async function(e){e.preventDefault();$('se-error').hidden=true;
+ try{await post('/api/admin/senders/save',{id:SE.id,label:$('se-label').value.trim(),active:$('se-active').checked,users:Array.from($('se-users').querySelectorAll('input:checked')).map(function(x){return x.value;})});$('se-dlg').close();toast('השולח עודכן');await loadSenders();}
+ catch(err){senderError('se-error',err);}});
+$('se-delete').addEventListener('click',async function(){const x=SE;if(!await confirmAction('הסרת השולח','להסיר את '+senderText(x)+'? אי אפשר יהיה לשלוח בשמו, ושליחות מתוזמנות בשמו ייכשלו. הוא לא יוסר מחשבון המיקרופיי.','הסרה'))return;
+ try{await post('/api/admin/senders/delete',{id:x.id});$('se-dlg').close();toast('השולח הוסר');await loadSenders();}catch(err){senderError('se-error',err);}});
 async function loadNumbers(){NUMBERS=(await get('/api/admin/numbers')).numbers;const body=$('n-rows');body.replaceChildren();
  for(const n of NUMBERS){const tr=el('tr','click');tr.tabIndex=0;tr.dataset.number=n.number;const status=el('td');status.append(el('span','tag'+(n.active?'':' off'),n.active?'פעיל':'מושבת'));
   tr.append(cell(n.label),cell(local(n.number),'phone'),status,cell(nf.format(n.users)));body.append(tr);}
@@ -531,7 +620,7 @@ async function loadOptouts(){OPTOUTS=(await get('/api/admin/optouts')).optouts;r
 function renderOptouts(){const q=$('o-q').value.replace(/[^0-9+]/g,'');const body=$('o-rows');body.replaceChildren();let shown=0;
  for(const o of OPTOUTS){if(q&&o.number.indexOf(q.replace(/^0/,''))<0&&local(o.number).replace(/-/g,'').indexOf(q)<0)continue;if(++shown>500)break;
   const tr=el('tr');const rm=el('button','ghost danger','הסרה');rm.type='button';rm.dataset.number=o.number;const last=el('td');last.append(rm);
-  tr.append(cell(local(o.number),'phone'),cell(o.source==='keyword'?'תגובת הסרה':'הוספה ידנית'),cell(shortFmt.format(o.created_at),'muted'),cell(o.created_by||'—','muted'),last);body.append(tr);}
+  tr.append(cell(local(o.number),'phone'),cell(o.source==='keyword'?'תגובת הסרה':o.source==='link'?'קישור הסרה':'הוספה ידנית'),cell(shortFmt.format(o.created_at),'muted'),cell(o.created_by||'—','muted'),last);body.append(tr);}
  if(!shown){const tr=el('tr');const td=cell(q?'המספר לא נמצא ברשימה':'הרשימה ריקה','muted');td.colSpan=5;tr.append(td);body.append(tr);}
  $('o-count').textContent=nf.format(OPTOUTS.length)+' מספרים ברשימה';}
 $('o-q').addEventListener('input',renderOptouts);
@@ -554,9 +643,9 @@ $('c-fields').addEventListener('click',openFields);
 $('fm-form').addEventListener('submit',async function(e){e.preventDefault();$('fm-error').hidden=true;$('fm-save').disabled=true;
  try{SETTINGS=await post('/api/admin/settings',{contact_fields:fieldsFrom($('fm-fields'))});$('fm-dlg').close();toast('השדות נשמרו');if(!$('c-rows').closest('[data-panel]').hidden)await loadContacts();}catch(err){dlgError('fm-error',err);}finally{$('fm-save').disabled=false;}});
 async function loadSettings(){SETTINGS=await get('/api/admin/settings');$('s-fields').replaceChildren();for(const f of SETTINGS.contact_fields)$('s-fields').append(fieldRow(f));$('s-org').value=SETTINGS.org_name;$('s-density').value=SETTINGS.default_density;$('s-refresh').value=SETTINGS.refresh_seconds;$('s-max').value=SETTINGS.max_recipients;
- $('s-daily').value=SETTINGS.default_daily_limit;$('s-keywords').value=SETTINGS.optout_keywords.join(', ');$('s-optout').value=SETTINGS.optout_text;$('s-intl').checked=SETTINGS.allow_international;$('s-listjson').checked=SETTINGS.micropay_listjson;$('s-links').value=SETTINGS.link_base;$('s-error').hidden=true;}
+ $('s-daily').value=SETTINGS.default_daily_limit;$('s-keywords').value=SETTINGS.optout_keywords.join(', ');$('s-optout').value=SETTINGS.optout_text;$('s-optout-link').value=SETTINGS.optout_link_text;$('s-intl').checked=SETTINGS.allow_international;$('s-listjson').checked=SETTINGS.micropay_listjson;$('s-links').value=SETTINGS.link_base;$('s-error').hidden=true;}
 $('s-form').addEventListener('submit',async function(e){e.preventDefault();$('s-error').hidden=true;const n=function(id){return Number($(id).value);};
- try{SETTINGS=await post('/api/admin/settings',{org_name:$('s-org').value,default_density:$('s-density').value,refresh_seconds:n('s-refresh'),max_recipients:n('s-max'),default_daily_limit:n('s-daily'),optout_keywords:$('s-keywords').value.split(',').map(function(s){return s.trim();}).filter(Boolean),optout_text:$('s-optout').value,allow_international:$('s-intl').checked,micropay_listjson:$('s-listjson').checked,link_base:$('s-links').value.trim(),contact_fields:fieldsFrom($('s-fields'))});
+ try{SETTINGS=await post('/api/admin/settings',{org_name:$('s-org').value,default_density:$('s-density').value,refresh_seconds:n('s-refresh'),max_recipients:n('s-max'),default_daily_limit:n('s-daily'),optout_keywords:$('s-keywords').value.split(',').map(function(s){return s.trim();}).filter(Boolean),optout_text:$('s-optout').value,optout_link_text:$('s-optout-link').value.trim(),allow_international:$('s-intl').checked,micropay_listjson:$('s-listjson').checked,link_base:$('s-links').value.trim(),contact_fields:fieldsFrom($('s-fields'))});
   toast('ההגדרות נשמרו');await loadSettings();$('org').textContent=SETTINGS.org_name||'מצב הגשה אינו אישור מסירה';}
  catch(err){dlgError('s-error',err);}});
 

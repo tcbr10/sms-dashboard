@@ -18,12 +18,18 @@ export async function flowsFor(env: Env, user: User): Promise<{id:number;name:st
  const rows = (await env.DB.prepare('SELECT * FROM flows WHERE active=1 AND system_number IN (SELECT value FROM json_each(?)) ORDER BY name').bind(JSON.stringify(numbers)).all<Omit<Flow,'steps'> & {steps:string}>()).results.map(parseFlow);
  return rows.map(f => ({id:f.id,name:f.name,system_number:f.system_number,first:f.steps[0]?.text ?? ''}));
 }
+// The sender IDs a user may send as: admins every active one, others those an admin assigned to them. A text name
+// Micropay refused is left out.
+export type SenderId = {id:number;kind:'phone'|'name';value:string;label:string;status:string};
+export async function sendersFor(env: Env, user: User): Promise<SenderId[]> {
+ return (await env.DB.prepare("SELECT s.id,s.kind,s.value,s.label,s.status FROM senders s WHERE s.active=1 AND s.status!='rejected' AND (?1=1 OR EXISTS (SELECT 1 FROM sender_users u WHERE u.sender_id=s.id AND u.email=?2)) ORDER BY s.label,s.value").bind(user.role === 'admin' ? 1 : 0, user.email).all<SenderId>()).results;
+}
 // Marks the user as seen at most once a minute; the admin page shows users seen in the last two minutes as connected.
 export function touch(env: Env, email: string): Promise<unknown> { const now = Date.now(); return env.DB.prepare('UPDATE users SET last_seen_at=? WHERE email=? AND (last_seen_at IS NULL OR last_seen_at<?)').bind(now, email, now-60000).run(); }
 export async function me(env: Env, user: User): Promise<Response> {
- const [settings, numbers, sent, flows] = await Promise.all([loadSettings(env.DB), numbersFor(env, user), sentLast24h(env, user.email), flowsFor(env, user)]);
+ const [settings, numbers, sent, flows, senders] = await Promise.all([loadSettings(env.DB), numbersFor(env, user), sentLast24h(env, user.email), flowsFor(env, user), sendersFor(env, user)]);
  const admin = user.role === 'admin'; let columns: unknown = null; try { columns = user.columns ? JSON.parse(user.columns) : null; } catch { /* fall back to the default columns */ }
- return json({email:user.email,name:user.name,role:user.role,density:user.density ?? settings.default_density,columns,test_number:user.test_number,numbers,can_bulk_send:admin || !!user.can_bulk_send,can_edit_contacts:admin || !!user.can_edit_contacts,daily_limit:admin ? null : user.daily_limit ?? settings.default_daily_limit,sent_24h:sent,contact_fields:settings.contact_fields,flows,settings:{org_name:settings.org_name,refresh_seconds:settings.refresh_seconds,max_recipients:settings.max_recipients,optout_text:settings.optout_text,allow_international:settings.allow_international,micropay_listjson:settings.micropay_listjson,link_base:settings.link_base}});
+ return json({email:user.email,name:user.name,role:user.role,density:user.density ?? settings.default_density,columns,test_number:user.test_number,numbers,can_bulk_send:admin || !!user.can_bulk_send,can_edit_contacts:admin || !!user.can_edit_contacts,daily_limit:admin ? null : user.daily_limit ?? settings.default_daily_limit,sent_24h:sent,contact_fields:settings.contact_fields,flows,settings:{org_name:settings.org_name,refresh_seconds:settings.refresh_seconds,max_recipients:settings.max_recipients,optout_text:settings.optout_text,allow_international:settings.allow_international,micropay_listjson:settings.micropay_listjson,link_base:settings.link_base,optout_link_text:settings.optout_link_text},senders});
 }
 // Personal preferences: row spacing, visible columns and the user's own test number.
 export async function prefs(request: Request, env: Env, user: User): Promise<Response> {

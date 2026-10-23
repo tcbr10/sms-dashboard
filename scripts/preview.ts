@@ -60,7 +60,10 @@ setInterval(async () => {
 }, 6000);
 // Fake Micropay: accepts every send and logs it without the token.
 let task = 1000;
-const fakeMicropay = async (_url: string, init: RequestInit) => { const {token: _, ...request} = JSON.parse(String(init.body)); console.log('[fake Micropay]', JSON.stringify(request)); return new Response('OK ' + (++task)); };
+// Sender ID verification accepts the code 12345.
+const fakeMicropay = async (url: string, init: RequestInit) => { const {token: _, ...request} = JSON.parse(String(init.body)); console.log('[fake Micropay]', url.split('/').pop(), JSON.stringify(request));
+ if (url.endsWith('senderVerify.php')) return new Response(request.code === undefined ? '{"status":1,"message":"CODE_SENT"}' : request.code === '12345' ? '{"status":1,"message":"OK"}' : 'WRONG_CODE');
+ return new Response('OK ' + (++task)); };
 
 createServer(async (req, res) => {
  const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(chunk as Buffer);

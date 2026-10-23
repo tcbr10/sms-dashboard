@@ -7,6 +7,7 @@ import {accessConfigured,lastSync,syncAccess} from './access';
 import {forwards} from './forwards';
 import {validateRules} from './scope';
 import {flows} from './flows';
+import {senders} from './senders';
 const DAY = 86400000;
 function email(value: unknown): string { const e = text(value,'email',254).trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw new HttpError(400,'Invalid email'); return e; }
 function name(value: unknown): string { if (value === undefined) return ''; if (typeof value !== 'string' || value.trim().length > 80) throw new HttpError(400,'Name must be at most 80 characters'); return value.trim(); }
@@ -26,8 +27,9 @@ export async function admin(request: Request, url: URL, env: Env, user: User, fe
  if (path === 'imports' || path.startsWith('imports/')) return imports(request,path,env,user);
  if (path === 'forwards' || path.startsWith('forwards/')) return forwards(request,path,env,user,fetcher);
  if (path === 'flows' || path.startsWith('flows/')) return flows(request,path,url,env,user);
+ if (path === 'senders' || path.startsWith('senders/')) return senders(request,path,env,user,fetcher);
  if (request.method === 'GET') {
-  if (path === 'users') { const r = await env.DB.prepare("SELECT u.email,u.name,u.role,u.active,u.can_bulk_send,u.can_edit_contacts,u.daily_limit,u.created_at,u.last_seen_at,u.test_number,u.sessions_revoked_at,(SELECT json_group_array(json_object('number',n.system_number,'can_send',n.can_send,'view_from',n.view_from,'view_rules',json(n.view_rules))) FROM user_numbers n WHERE n.email=u.email) AS numbers,(SELECT COALESCE(SUM(s.recipients),0) FROM sends s WHERE s.email=u.email AND s.created_at>? AND s.status!='rejected') AS sent_24h FROM users u ORDER BY u.role,u.name,u.email").bind(Date.now()-DAY).all<Record<string,unknown>>(); return json({users:r.results.map(u => ({...u,numbers:JSON.parse(String(u.numbers))})),access:{configured:accessConfigured(env),last:await lastSync(env)}}); }
+  if (path === 'users') { const r = await env.DB.prepare("SELECT u.email,u.name,u.role,u.active,u.can_bulk_send,u.can_edit_contacts,u.daily_limit,u.created_at,u.last_seen_at,u.test_number,u.sessions_revoked_at,(SELECT json_group_array(json_object('number',n.system_number,'can_send',n.can_send,'view_from',n.view_from,'view_rules',json(n.view_rules))) FROM user_numbers n WHERE n.email=u.email) AS numbers,(SELECT json_group_array(su.sender_id) FROM sender_users su WHERE su.email=u.email) AS senders,(SELECT COALESCE(SUM(s.recipients),0) FROM sends s WHERE s.email=u.email AND s.created_at>? AND s.status!='rejected') AS sent_24h FROM users u ORDER BY u.role,u.name,u.email").bind(Date.now()-DAY).all<Record<string,unknown>>(); return json({users:r.results.map(u => ({...u,numbers:JSON.parse(String(u.numbers)),senders:JSON.parse(String(u.senders))})),access:{configured:accessConfigured(env),last:await lastSync(env)}}); }
   if (path === 'numbers') return json({numbers:(await env.DB.prepare('SELECT s.number,s.label,s.active,s.bot_reply,(SELECT COUNT(*) FROM user_numbers u WHERE u.system_number=s.number) AS users FROM system_numbers s ORDER BY s.active DESC,s.label,s.number').all()).results});
   if (path === 'settings') return json(await loadSettings(env.DB));
   if (path === 'contacts') { const q = (url.searchParams.get('q') || '').slice(0,100); const needle = q.replace(/^0/,''); const where = q ? 'WHERE instr(number,?)>0 OR EXISTS (SELECT 1 FROM json_each(data) j WHERE instr(lower(j.value),lower(?))>0)' : '';
@@ -53,11 +55,15 @@ export async function admin(request: Request, url: URL, env: Env, user: User, fe
   if (target === user.email && (role !== 'admin' || !active)) throw new HttpError(400,'You cannot remove your own admin rights or disable yourself');
   if (existing?.role === 'admin' && existing.active && (role !== 'admin' || !active) && await activeAdmins(env) <= 1) throw new HttpError(400,'At least one active admin is required');
   const assignments = [...numbers].map(([number,a]) => ({number,...a}));
+  // Sender IDs the user may send as, when the dialog sends them; admins may use every sender ID anyway.
+  const senderIds = body.senders === undefined ? null : Array.isArray(body.senders) && body.senders.length <= 200 && body.senders.every(x => Number.isSafeInteger(x)) ? [...new Set(body.senders as number[])] : (() => { throw new HttpError(400,'senders must be a list of sender IDs'); })();
+  if (senderIds?.length) { const known = (await env.DB.prepare('SELECT COUNT(*) AS n FROM senders WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(senderIds)).first<{n:number}>())?.n; if (known !== senderIds.length) throw new HttpError(400,'Unknown sender ID'); }
   await env.DB.batch([
    env.DB.prepare('INSERT INTO users (email,name,role,active,can_bulk_send,can_edit_contacts,daily_limit,test_number,created_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET name=excluded.name,role=excluded.role,active=excluded.active,can_bulk_send=excluded.can_bulk_send,can_edit_contacts=excluded.can_edit_contacts,daily_limit=excluded.daily_limit,test_number=excluded.test_number').bind(target,label,role,active,bulk,contacts,limit,test,Date.now()),
    env.DB.prepare('DELETE FROM user_numbers WHERE email=?').bind(target),
    env.DB.prepare("INSERT INTO user_numbers (email,system_number,can_send,view_from,view_rules) SELECT ?,json_extract(value,'$.number'),json_extract(value,'$.can_send'),json_extract(value,'$.view_from'),json_extract(value,'$.view_rules') FROM json_each(?)").bind(target,JSON.stringify(assignments)),
-   audit(env,user.email,create ? 'user.create' : 'user.update',target,{name:label,role,active:!!active,can_bulk_send:!!bulk,can_edit_contacts:!!contacts,daily_limit:limit,numbers:assignments}),
+   ...(senderIds ? [env.DB.prepare('DELETE FROM sender_users WHERE email=?').bind(target),env.DB.prepare('INSERT INTO sender_users (sender_id,email) SELECT value,? FROM json_each(?)').bind(target,JSON.stringify(senderIds))] : []),
+   audit(env,user.email,create ? 'user.create' : 'user.update',target,{name:label,role,active:!!active,can_bulk_send:!!bulk,can_edit_contacts:!!contacts,daily_limit:limit,numbers:assignments,...(senderIds ? {senders:senderIds} : {})}),
   ]);
   // Access only needs updating when someone is added, disabled or re-enabled.
   const access = create || !!existing?.active !== !!active ? await syncAccess(env,fetcher,user.email) : null;
@@ -67,7 +73,7 @@ export async function admin(request: Request, url: URL, env: Env, user: User, fe
   const target = email(body.email); if (target === user.email) throw new HttpError(400,'You cannot delete yourself');
   const existing = await env.DB.prepare('SELECT role,active FROM users WHERE email=?').bind(target).first<{role:string;active:number}>(); if (!existing) throw new HttpError(404,'User not found');
   if (existing.role === 'admin' && existing.active && await activeAdmins(env) <= 1) throw new HttpError(400,'At least one active admin is required');
-  await env.DB.batch([env.DB.prepare('DELETE FROM user_numbers WHERE email=?').bind(target),env.DB.prepare('DELETE FROM users WHERE email=?').bind(target),audit(env,user.email,'user.delete',target)]);
+  await env.DB.batch([env.DB.prepare('DELETE FROM user_numbers WHERE email=?').bind(target),env.DB.prepare('DELETE FROM sender_users WHERE email=?').bind(target),env.DB.prepare('DELETE FROM users WHERE email=?').bind(target),audit(env,user.email,'user.delete',target)]);
   return json({ok:true,access:existing.active ? await syncAccess(env,fetcher,user.email) : null});
  }
  // Ends the user's current sign-in: Access logins issued before now are refused, so they must sign in again.

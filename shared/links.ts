@@ -33,6 +33,19 @@ export function trackLinks(text: string, base: string): {text:string;links:{code
  return {text:out+text.slice(at),links};
 }
 
+// Opt-out links: each customer gets one code, kept in optout_codes and reused by every later send, so a send writes
+// rows only for customers who never had one. A code collision skips that row, and the loop gives it a new code.
+export async function optoutCodes(env: Env, numbers: string[], now: number): Promise<Map<string,string>> {
+ const list = JSON.stringify(numbers);
+ for (let attempt = 0; attempt < 4; attempt++) {
+  const have = new Map((await env.DB.prepare('SELECT code,peer_number FROM optout_codes WHERE peer_number IN (SELECT value FROM json_each(?))').bind(list).all<{code:string;peer_number:string}>()).results.map(r => [r.peer_number,r.code]));
+  const missing = numbers.filter(n => !have.has(n)); if (!missing.length) return have;
+  await env.DB.prepare("INSERT INTO optout_codes (code,peer_number,created_at) SELECT json_extract(value,'$.c'),json_extract(value,'$.n'),? FROM json_each(?) WHERE true ON CONFLICT DO NOTHING").bind(now,JSON.stringify(missing.map(n => ({c:newCode(),n})))).run();
+ }
+ throw new Error('Could not create opt-out links');
+}
+export const optoutUrl = (base: string, code: string) => base + '/x/' + code;
+
 // Clicks. Phones' link previews, carriers' spam filters and security scanners open links without anyone tapping them.
 // A click is counted as probably automatic when its user agent looks like a bot or preview fetcher, when it comes from a
 // cloud provider's network, or when it comes within seconds of the link being created (before a person could have read

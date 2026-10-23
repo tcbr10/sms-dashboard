@@ -1,8 +1,9 @@
 import {HttpError} from './validation';
 export type ContactField = {id:string;label:string};
 export const MAX_CONTACT_FIELDS = 20;
-export type Settings = {contact_fields:ContactField[];org_name:string;default_density:'wide'|'narrow'|'dense';refresh_seconds:number;max_recipients:number;default_daily_limit:number;optout_keywords:string[];optout_text:string;allow_international:boolean;micropay_listjson:boolean;link_base:string};
-export const DEFAULT_SETTINGS: Settings = {contact_fields:[{id:'name',label:'שם'},{id:'id_number',label:'תעודת זהות'}],org_name:'',default_density:'narrow',refresh_seconds:5,max_recipients:500,default_daily_limit:1000,optout_keywords:['הסר','הסרה','STOP','UNSUBSCRIBE'],optout_text:'',allow_international:false,micropay_listjson:false,link_base:''};
+export const OPTOUT_LINK = '{קישור}';
+export type Settings = {contact_fields:ContactField[];org_name:string;default_density:'wide'|'narrow'|'dense';refresh_seconds:number;max_recipients:number;default_daily_limit:number;optout_keywords:string[];optout_text:string;allow_international:boolean;micropay_listjson:boolean;link_base:string;optout_link_text:string};
+export const DEFAULT_SETTINGS: Settings = {contact_fields:[{id:'name',label:'שם'},{id:'id_number',label:'תעודת זהות'}],org_name:'',default_density:'narrow',refresh_seconds:5,max_recipients:500,default_daily_limit:1000,optout_keywords:['הסר','הסרה','STOP','UNSUBSCRIBE'],optout_text:'',allow_international:false,micropay_listjson:false,link_base:'',optout_link_text:''};
 export async function loadSettings(db: D1Database): Promise<Settings> {
  const rows = await db.prepare('SELECT key,value FROM settings').all<{key:string;value:string}>(); const stored: Record<string,unknown> = {};
  for (const r of rows.results) try { stored[r.key] = JSON.parse(r.value); } catch { /* ignore a corrupt value and keep the default */ }
@@ -26,8 +27,11 @@ export function validateSettings(input: Record<string,unknown>): Settings {
  // link_base: the links Worker's address (https and a hostname only), which tracked links start with. Empty turns tracking off.
  // http://localhost is allowed for the local preview.
  const linkBase = str(input.link_base,'link_base',60).replace(/\/+$/,'').toLowerCase();
+// optout_link_text: added instead of optout_text to sends with a sender ID, which recipients may not be able to reply to.
+ // {קישור} becomes the recipient's own opt-out link on the links Worker.
+ const optoutLink = str(input.optout_link_text,'optout_link_text',120); if (optoutLink && !optoutLink.includes(OPTOUT_LINK)) throw new HttpError(400,'optout_link_text must contain {'+OPTOUT_LINK.slice(1,-1)+'}');
  if (linkBase && !/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(linkBase) && !/^http:\/\/localhost(:\d{1,5})?$/.test(linkBase)) throw new HttpError(400,'link_base must be an https:// address with a hostname only');
- return {contact_fields:contactFields(input.contact_fields),org_name:str(input.org_name,'org_name',60),default_density:density,refresh_seconds:int(input.refresh_seconds,'refresh_seconds',3,60),max_recipients:int(input.max_recipients,'max_recipients',1,5000),default_daily_limit:int(input.default_daily_limit,'default_daily_limit',0,100000),optout_keywords:words,optout_text:str(input.optout_text,'optout_text',120),allow_international:input.allow_international,micropay_listjson:input.micropay_listjson,link_base:linkBase};
+ return {contact_fields:contactFields(input.contact_fields),org_name:str(input.org_name,'org_name',60),default_density:density,refresh_seconds:int(input.refresh_seconds,'refresh_seconds',3,60),max_recipients:int(input.max_recipients,'max_recipients',1,5000),default_daily_limit:int(input.default_daily_limit,'default_daily_limit',0,100000),optout_keywords:words,optout_text:str(input.optout_text,'optout_text',120),allow_international:input.allow_international,micropay_listjson:input.micropay_listjson,link_base:linkBase,optout_link_text:optoutLink};
 }
 // A message opts out when, ignoring case, spaces and surrounding punctuation, it is exactly one of the keywords.
 export function isOptOut(body: string, keywords: string[]): boolean { const t = body.trim().replace(/^[\s.,!?"'״׳-]+|[\s.,!?"'״׳-]+$/g,'').toLowerCase(); return t.length > 0 && keywords.some(k => k.toLowerCase() === t); }

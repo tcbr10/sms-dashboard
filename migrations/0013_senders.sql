@@ -1,0 +1,11 @@
+CREATE TABLE senders (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL CHECK (kind IN ('phone','name')), value TEXT NOT NULL UNIQUE, label TEXT NOT NULL DEFAULT '', status TEXT NOT NULL CHECK (status IN ('verified','unconfirmed','confirmed','rejected')), active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)), created_by TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE sender_users (sender_id INTEGER NOT NULL, email TEXT NOT NULL, PRIMARY KEY (sender_id, email)) WITHOUT ROWID;
+CREATE INDEX idx_sender_users_email ON sender_users(email);
+ALTER TABLE sends ADD COLUMN sender_id INTEGER;
+ALTER TABLE scheduled_sends ADD COLUMN sender_id INTEGER;
+ALTER TABLE messages ADD COLUMN sender TEXT;
+CREATE TABLE optout_codes (code TEXT PRIMARY KEY, peer_number TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL) WITHOUT ROWID;
+CREATE TABLE opt_outs_new (number TEXT PRIMARY KEY, source TEXT NOT NULL CHECK (source IN ('keyword','manual','link')), created_at INTEGER NOT NULL, created_by TEXT);
+INSERT INTO opt_outs_new (number,source,created_at,created_by) SELECT number,source,created_at,created_by FROM opt_outs;
+DROP TABLE opt_outs;
+ALTER TABLE opt_outs_new RENAME TO opt_outs;

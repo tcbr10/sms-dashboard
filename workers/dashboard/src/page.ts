@@ -118,6 +118,7 @@ const body = header('messages',true) + String.raw`
 <dialog id="compose" aria-labelledby="c-title"><form class="dialog-body" id="c-form" novalidate>
  <div class="dialog-head"><h2 id="c-title">הודעה חדשה</h2><button type="button" class="icon-btn" id="c-close" aria-label="סגירה">`+svg('close')+String.raw`</button></div>
  <label class="fld"><span>שליחה מהמספר</span><select id="c-from"></select></label>
+ <div class="fld" id="c-sender-row" hidden><label class="fld"><span>השולח שהנמען יראה</span><select id="c-sender"></select></label><p class="hint" id="c-sender-note" hidden></p></div>
  <div class="fld" id="c-flow-row" hidden><label class="fld"><span>תהליך בוט</span><select id="c-flow"></select></label><p class="hint" id="c-flow-hint" hidden>ההודעה היא השלב הראשון של התהליך, ותשובות הנמענים ימשיכו אותו אוטומטית.</p><label class="check hint" id="c-stop-row"><input type="checkbox" id="c-stop-bot">השבתת הבוט לנמענים האלה (הבוט לא יענה להם עד שיופעל מחדש)</label></div>
  <div class="fld"><label class="label" for="c-to">נמענים</label>
   <textarea id="c-to" dir="ltr" rows="3" placeholder="מספרי טלפון מופרדים בפסיק או בשורה חדשה"></textarea>
@@ -303,7 +304,7 @@ function build(m,open,now){const tr=el('tr',m.direction+(open?' open':''));tr.ta
  for(const id of visible)tr.append(cell(col(id),m,now));
  if(open){const det=el('div','details');det.append(fact('נקלטה',fullFmt.format(m.received_at)));if(m.time_source==='receipt')det.append(fact('זמן ההודעה','לפי זמן הקליטה'));
   for(const f of ME.contact_fields)if(m.contact&&m.contact[f.id])det.append(fact(f.label,m.contact[f.id]));
-  if(m.sent_by)det.append(fact('נשלחה על ידי',m.sent_by));const ck=clickState(m);if(ck)det.append(fact('קישורים',(ck==='clicked'?(m.clicks===1?'לחיצה אחת':nf.format(m.clicks)+' לחיצות')+' · ראשונה '+fullFmt.format(m.clicked_at):CLICKS[ck])+(m.auto_clicks?' · '+(m.auto_clicks===1?'פתיחה אוטומטית אחת':nf.format(m.auto_clicks)+' פתיחות אוטומטיות'):'')));if(m.import_id)det.append(fact('מקור','ייבוא מקובץ'));const bi=botInfo.get(m.id);
+  if(m.sent_by)det.append(fact('נשלחה על ידי',m.sent_by));if(m.sender)det.append(fact('נשלחה בשם',/^[+][0-9]+$/.test(m.sender)?local(m.sender):m.sender));const ck=clickState(m);if(ck)det.append(fact('קישורים',(ck==='clicked'?(m.clicks===1?'לחיצה אחת':nf.format(m.clicks)+' לחיצות')+' · ראשונה '+fullFmt.format(m.clicked_at):CLICKS[ck])+(m.auto_clicks?' · '+(m.auto_clicks===1?'פתיחה אוטומטית אחת':nf.format(m.auto_clicks)+' פתיחות אוטומטיות'):'')));if(m.import_id)det.append(fact('מקור','ייבוא מקובץ'));const bi=botInfo.get(m.id);
   if(bi&&bi.answer)det.append(fact('תשובה לבוט',(bi.answer.meaning||bi.answer.answer)+' · '+bi.answer.flow));if(bi&&bi.conversation)det.append(fact('בוט','בשיחה בתהליך '+bi.conversation.flow));if(bi&&bi.blocked)det.append(fact('בוט','מושבת ללקוח הזה'));if(m.provider_message_id)det.append(fact('מזהה ספק',m.provider_message_id));
   const acts=el('div','actions');if(canSend(m.system_number))acts.append(act('reply','השב'));if(ME.can_edit_contacts&&ME.contact_fields.length)acts.append(act('edit','עריכת פרטים'));if(bi&&canSend(m.system_number))acts.append(bi.blocked?act('bot-on','הפעלת הבוט'):act('bot-off','השבתת הבוט'));acts.append(act('copy','העתקת הטקסט'),act('chat','כל השיחה'));det.append(acts);
   (tr.querySelector('.c-msg')||tr.lastChild).append(det);}
@@ -522,8 +523,8 @@ $('c-vars').addEventListener('click',function(){popover($('c-vars'),function(m){
  m.append(el('hr'),el('p','hint','כל משתנה מוחלף בפרטי הנמען. משתנה ריק יוסר, או שאפשר לקבוע ערך חלופי: {שם|לקוח יקר}.'));});});
 // Preview for the first recipient, rendered by the server with their contact data.
 let previewTimer=0;
-function schedulePreview(n0){const body=$('c-body').value;const key=JSON.stringify([$('c-from').value,n0,body]);if(key===C.preview)return;C.preview=key;clearTimeout(previewTimer);
- previewTimer=setTimeout(function(){post('/api/send/preview',{system_number:$('c-from').value,recipient:n0,body:body,bulk:recipients().list.length>1}).then(function(d){if(C.preview!==key)return;$('c-vars-hint').textContent='לדוגמה ל-'+local(n0)+':\n'+d.body;}).catch(function(){});},500);}
+function schedulePreview(n0){const body=$('c-body').value;const key=JSON.stringify([$('c-from').value,n0,body,$('c-sender').value]);if(key===C.preview)return;C.preview=key;clearTimeout(previewTimer);
+ previewTimer=setTimeout(function(){post('/api/send/preview',{system_number:$('c-from').value,recipient:n0,body:body,bulk:recipients().list.length>1,sender:!!senderChoice()}).then(function(d){if(C.preview!==key)return;$('c-vars-hint').textContent='לדוגמה ל-'+local(n0)+':\n'+d.body;}).catch(function(){});},500);}
 function senders(){return ME?ME.numbers.filter(function(n){return n.can_send;}):[];}
 function canSend(number){return senders().some(function(n){return n.number===number;});}
 function openCompose(from,to){const list=senders();if(!list.length)return;const sel=$('c-from');sel.replaceChildren();
@@ -532,6 +533,7 @@ function openCompose(from,to){const list=senders();if(!list.length)return;const 
  const soon=Date.now()+3600000;$('c-later').checked=false;$('c-later-row').hidden=true;$('c-later-date').value=ymd(soon);const z=zoned(soon);$('c-later-time').value=pad(z.hour)+':00';
  $('c-to').value=to?local(to):'';$('c-body').value='';$('c-import').hidden=true;$('c-error').hidden=true;$('c-file-btn').hidden=$('c-save-list').hidden=!ME.can_bulk_send;
  $('c-test').value=ME.test_number?local(ME.test_number):'';$('c-test-save').checked=false;renderComposeLists();if(ME.can_bulk_send&&LISTS===null)loadLists();
+ const ss=$('c-sender');ss.replaceChildren();const sys=el('option','','מספר המערכת (ברירת מחדל)');sys.value='';ss.append(sys);for(const x of (ME.senders||[])){const o=el('option','',senderLabel(x));o.value=String(x.id);ss.append(o);}$('c-sender-row').hidden=!(ME.senders||[]).length;$('c-sender-note').hidden=true;
  $('c-body').readOnly=false;$('c-stop-bot').checked=false;$('c-track').checked=false;renderComposeFlows();updateCompose();$('compose').showModal();(to?$('c-body'):$('c-to')).focus();}
 // Bot flows of the chosen number. Choosing one makes its first step the message and starts the flow for the recipients.
 function composeFlows(){return (ME.flows||[]).filter(function(f){return f.system_number===$('c-from').value;});}
@@ -551,12 +553,20 @@ function recipients(){const typed=$('c-to').value.split(/[;\n]+/).map(function(s
  return {list:Array.from(valid),invalid:invalid,duplicates:found-valid.size};}
 // Micropay bills 70 characters for a single Hebrew SMS and 67 per part after that (140 and 134 in English).
 function segments(text){const len=text.replace(/\n/g,'\r\n').length;if(!len)return 0;const uni=/[^\x00-\x7f]/.test(text);return len<=(uni?70:140)?1:Math.ceil(len/(uni?67:134));}
-function finalBody(n){let b=$('c-body').value;if(tracking())b=sampleLinks(b);const t=ME.settings.optout_text;if(n>1&&t&&b.indexOf(t)<0)b+='\n'+t;return b;}
+function finalBody(n){let b=$('c-body').value;if(tracking())b=sampleLinks(b);if(n>1&&senderChoice())return ME.settings.optout_link_text?b+'\n'+optoutLine():b;const t=ME.settings.optout_text;if(n>1&&t&&b.indexOf(t)<0)b+='\n'+t;return b;}
+// Sender IDs an admin assigned to this user (shared/dispatch.ts). Replies to them don't reach the system, so a bot flow
+// can't start from one, and a send to several recipients ends with a personal opt-out link instead of "reply to opt out".
+function senderChoice(){const v=$('c-sender-row').hidden?'':$('c-sender').value;return v?(ME.senders||[]).find(function(x){return String(x.id)===v;})||null:null;}
+function senderLabel(x){return (x.label?x.label+' · ':'')+(x.kind==='phone'?local(x.value):x.value);}
+function optoutLine(){return ME.settings.optout_link_text.replace('{קישור}',ME.settings.link_base+'/x/Q7mP2aK');}
+function applySender(){const x=senderChoice();const note=$('c-sender-note');note.hidden=!x;
+ if(x)note.textContent=x.kind==='phone'?'הנמענים יראו את '+local(x.value)+' כשולח. תשובות שלהם יגיעו למספר הזה ולא למערכת, ולכן אין תהליך בוט, וההסרה היא בקישור.':'הנמענים יראו את '+x.value+' כשולח ולא יוכלו להשיב. אין תהליך בוט, וההסרה היא בקישור.';
+ if(x){$('c-flow').value='';applyComposeFlow();$('c-flow-row').hidden=true;}else renderComposeFlows();}
 // Link tracking (shared/links.ts): each link becomes a short link of its own for every recipient. Lengths are counted
 // with a sample code, which is as long as the real ones.
 function tracking(){return !!ME.settings.link_base&&!$('c-track-row').hidden&&$('c-track').checked;}
 function sampleLinks(b){let out='',at=0;for(const f of findLinks(b)){if(f.url.toLowerCase().indexOf(ME.settings.link_base+'/')===0)continue;out+=b.slice(at,f.start)+ME.settings.link_base+'/Ab3xY9k';at=f.end;}return out+b.slice(at);}
-function updateCompose(){const r=recipients();const n=r.list.length;const links=ME.settings.link_base?findLinks($('c-body').value).length:0;$('c-track-row').hidden=!links;
+function updateCompose(){const r=recipients();const n=r.list.length;const sender=senderChoice();const links=ME.settings.link_base?findLinks($('c-body').value).length:0;$('c-track-row').hidden=!links;
  const body=finalBody(n);const seg=segments(body);
  $('c-track-hint').textContent=!tracking()?(links===1?'הקישור בהודעה יישלח כמו שהוא.':'הקישורים בהודעה יישלחו כמו שהם.')+' סימון האפשרות מחליף כל קישור בקישור מקוצר אישי לכל נמען, וכך אפשר לראות בטבלה מי לחץ.':
   (links===1?'הקישור יוחלף':'כל אחד מ-'+links+' הקישורים יוחלף')+' בקישור אישי לכל נמען, למשל '+ME.settings.link_base+'/Ab3xY9k. הלחיצות יופיעו בעמודה "לחיצות".'+(n>PERSONAL_BATCH&&!ME.settings.micropay_listjson?' ההודעה תישלח בקבוצות של '+PERSONAL_BATCH+' נמענים.':'');
@@ -565,9 +575,9 @@ function updateCompose(){const r=recipients();const n=r.list.length;const links=
  const vars=usedVars($('c-body').value);const personal=vars.length>0;const unknown=vars.filter(function(v){return varNames().indexOf(v)<0;});
  $('c-count').textContent=body.length?nf.format(body.length)+' / 1,000 תווים · '+seg+' SMS לנמען'+(personal?' (לפני מילוי המשתנים)':''):'';$('c-vars').hidden=$('c-body').readOnly;
  $('c-vars-hint').hidden=!personal;if(personal&&!unknown.length&&n)schedulePreview(r.list[0]);else if(personal)$('c-vars-hint').textContent=unknown.length?'':'התצוגה המקדימה תופיע אחרי שמוסיפים נמען.';
- $('c-optout').hidden=!(n>1&&ME.settings.optout_text);$('c-optout').textContent='בשליחה לכמה נמענים יתווסף בסוף ההודעה: '+ME.settings.optout_text;
+ const optLine=sender?(ME.settings.optout_link_text?optoutLine():''):ME.settings.optout_text;$('c-optout').hidden=!(n>1&&optLine);$('c-optout').textContent='בשליחה לכמה נמענים יתווסף בסוף ההודעה: '+optLine+(sender?' (קישור הסרה אישי לכל נמען)':'');
  $('c-usage').textContent=ME.daily_limit===null?'':'נוצלו '+nf.format(ME.sent_24h)+' מתוך '+nf.format(ME.daily_limit)+' ב-24 השעות האחרונות';
- const problem=!n?'':n>1&&!ME.can_bulk_send?'אין לך הרשאה לשלוח ליותר מנמען אחד':n>ME.settings.max_recipients?'אפשר לשלוח עד '+nf.format(ME.settings.max_recipients)+' נמענים בכל פעם':ME.daily_limit!==null&&ME.sent_24h+n>ME.daily_limit?'השליחה תחרוג מהמגבלה היומית שלך':body.length>1000?'ההודעה ארוכה מדי':unknown.length?'משתנה לא מוכר: {'+unknown.join('}, {')+'}':'';
+ const problem=!n?'':n>1&&!ME.can_bulk_send?'אין לך הרשאה לשלוח ליותר מנמען אחד':n>ME.settings.max_recipients?'אפשר לשלוח עד '+nf.format(ME.settings.max_recipients)+' נמענים בכל פעם':ME.daily_limit!==null&&ME.sent_24h+n>ME.daily_limit?'השליחה תחרוג מהמגבלה היומית שלך':sender&&n>1&&!(ME.settings.optout_link_text&&ME.settings.link_base)?'כדי לשלוח בשם שולח לכמה נמענים, מנהל צריך להגדיר טקסט קישור הסרה בהגדרות':body.length>1000?'ההודעה ארוכה מדי':unknown.length?'משתנה לא מוכר: {'+unknown.join('}, {')+'}':'';
  const at=laterAt();const timeProblem=$('c-later').checked&&(!at||at<Date.now()+60000)?'יש לבחור מועד עתידי לשליחה':'';
  const ready=n>0&&$('c-body').value.trim().length>0&&!problem&&!timeProblem;
  $('c-total').textContent=problem||(ready?'סה״כ כ-'+nf.format(seg*n)+' SMS':'');$('c-total').className='hint'+(problem?' bad':'');
@@ -591,8 +601,9 @@ $('c-invalid-more').addEventListener('click',function(){const r=recipients();sho
 $('c-import-clear').addEventListener('click',function(){C.rows=null;C.imported=[];$('c-import').hidden=true;edited();});
 $('c-save-list').addEventListener('click',function(){const r=recipients();if(!r.list.length){composeError('אין נמענים לשמירה');return;}$('compose').close();editList(null,r.list);});
 for(const id of ['c-to','c-body'])$(id).addEventListener('input',edited);
-$('c-from').addEventListener('change',function(){renderComposeFlows();edited();});
+$('c-from').addEventListener('change',function(){applySender();edited();});
 $('c-track').addEventListener('change',edited);
+$('c-sender').addEventListener('change',function(){applySender();edited();});
 $('c-later').addEventListener('change',function(){$('c-later-row').hidden=!this.checked;edited();});
 for(const id of ['c-later-date','c-later-time'])$(id).addEventListener('change',edited);
 $('c-flow').addEventListener('change',function(){applyComposeFlow();edited();});
@@ -601,7 +612,7 @@ for(const id of ['c-close','c-cancel'])$(id).addEventListener('click',function()
 $('c-test-send').addEventListener('click',async function(){const n=normalize($('c-test').value);$('c-error').hidden=true;if(!n){composeError('מספר הבדיקה אינו תקין');return;}if(!$('c-body').value.trim()){composeError('יש לכתוב הודעה לפני שליחת בדיקה');return;}
  const b=this;b.disabled=true;
  try{if($('c-test-save').checked&&n!==ME.test_number){await post('/api/me/prefs',{test_number:n});ME.test_number=n;$('c-test-save').checked=false;}
-  const d=await post('/api/send',{id:crypto.randomUUID(),test:true,bulk_preview:recipients().list.length>1,system_number:$('c-from').value,recipients:[n],body:$('c-body').value,track_links:tracking()});
+  const d=await post('/api/send',{id:crypto.randomUUID(),test:true,bulk_preview:recipients().list.length>1,system_number:$('c-from').value,recipients:[n],body:$('c-body').value,track_links:tracking(),sender_id:senderChoice()?senderChoice().id:null});
   if(d.status==='rejected')composeError('הספק דחה את הודעת הבדיקה'+(d.error?': '+d.error:''));else toast(d.status==='accepted'?'הודעת הבדיקה נשלחה ל-'+local(n):'הודעת הבדיקה הועברה לספק, התוצאה לא ידועה');
   loadMe().then(updateCompose).catch(function(){});tick();}
  catch(err){composeError(message(err));}finally{b.disabled=false;}});
@@ -611,14 +622,14 @@ $('c-form').addEventListener('submit',async function(e){e.preventDefault();if(C.
  // Personalized and tracked messages go in batches of 40, each with its own send ID kept across retries, so retrying after a
  // failure sends only the batches that did not go out. Other messages go in one request, as before.
  const body=$('c-body').value;const flow=$('c-flow-row').hidden?'':$('c-flow').value;const stop=!flow&&!$('c-flow-row').hidden&&$('c-stop-bot').checked;
- const personal=usedVars(flow?((ME.flows||[]).find(function(f){return String(f.id)===flow;})||{first:''}).first:body).length>0;const at=laterAt();const track=tracking();
- if(at){try{const d=await post('/api/send',{id:C.id,system_number:$('c-from').value,recipients:r.list,body:body,flow_id:flow?Number(flow):null,stop_bot:stop,track_links:track,send_at:at});
+ const personal=usedVars(flow?((ME.flows||[]).find(function(f){return String(f.id)===flow;})||{first:''}).first:body).length>0;const at=laterAt();const track=tracking();const from=senderChoice();const senderId=from?from.id:null;
+ if(at){try{const d=await post('/api/send',{id:C.id,system_number:$('c-from').value,recipients:r.list,body:body,flow_id:flow?Number(flow):null,stop_bot:stop,track_links:track,sender_id:senderId,send_at:at});
    $('compose').close();toast(d.duplicate?'השליחה הזו כבר תוזמנה':'השליחה תוזמנה ל-'+shortFmt.format(d.send_at)+' · '+plural(d.recipients,'נמען אחד','נמענים'));}
   catch(err){composeError(message(err));}finally{C.sending=false;C.confirm=false;updateCompose();}return;}
- if(!C.batches){const size=(personal||track)&&!ME.settings.micropay_listjson?PERSONAL_BATCH:r.list.length;C.batches=[];for(let i=0;i<r.list.length;i+=size)C.batches.push({id:C.batches.length?crypto.randomUUID():C.id,list:r.list.slice(i,i+size),done:false});}
+ if(!C.batches){const size=(personal||track||(from&&r.list.length>1))&&!ME.settings.micropay_listjson?PERSONAL_BATCH:r.list.length;C.batches=[];for(let i=0;i<r.list.length;i+=size)C.batches.push({id:C.batches.length?crypto.randomUUID():C.id,list:r.list.slice(i,i+size),done:false});}
  const total={sent:0,accepted:0,rejected:0,unknown:0,opted:0,duplicate:false};
  try{for(let i=0;i<C.batches.length;i++){const b=C.batches[i];if(b.done)continue;if(C.batches.length>1)$('c-send-text').textContent='שולח '+nf.format(i+1)+' מתוך '+nf.format(C.batches.length)+'…';
-   const d=await post('/api/send',{id:b.id,system_number:$('c-from').value,recipients:b.list,body:body,flow_id:flow?Number(flow):null,stop_bot:stop,track_links:track,bulk:r.list.length>1});
+   const d=await post('/api/send',{id:b.id,system_number:$('c-from').value,recipients:b.list,body:body,flow_id:flow?Number(flow):null,stop_bot:stop,track_links:track,sender_id:senderId,bulk:r.list.length>1});
    if(d.status==='rejected'&&!d.duplicate){b.id=crypto.randomUUID();if(i===0)C.id=b.id;throw new Error('הספק דחה את השליחה'+(d.error?': '+d.error:'')+(total.sent?' ('+nf.format(total.sent)+' נמענים כבר קיבלו את ההודעה; שליחה חוזרת תמשיך מהמקום שנעצר)':''));}
    b.done=true;total.sent+=d.sent;total.duplicate=total.duplicate||!!d.duplicate;if(d.skipped)total.opted+=d.skipped.opted_out||0;
    if(d.counts){total.accepted+=d.counts.accepted;total.rejected+=d.counts.rejected;total.unknown+=d.counts.unknown;}else total[d.status==='accepted'?'accepted':'unknown']+=d.sent;}
@@ -633,7 +644,7 @@ $('new').addEventListener('click',function(){openCompose();});
 const SCH_STATUS={scheduled:'ממתינה',sent:'נשלחה',failed:'נכשלה',cancelled:'בוטלה'};
 async function openScheduled(){let d;try{d=await get('/api/scheduled');}catch(e){toast(message(e));return;}const body=$('sch-rows');body.replaceChildren();
  for(const s of d.scheduled){const tr=el('tr');const when=el('td');when.append(el('span','',shortFmt.format(s.send_at)));if(ME.role==='admin'&&s.email!==ME.email)when.append(el('span','sub-line',s.email));
-  const msg=el('td');msg.append(el('div','sch-body',(s.flow?'[בוט: '+s.flow+'] ':'')+s.body));msg.title=s.body;if(s.track_links)msg.append(el('span','tag','מעקב קישורים'));
+  const msg=el('td');msg.append(el('div','sch-body',(s.flow?'[בוט: '+s.flow+'] ':'')+s.body));msg.title=s.body;if(s.track_links)msg.append(el('span','tag','מעקב קישורים'));if(s.sender)msg.append(el('span','tag','בשם '+(/^[+][0-9]+$/.test(s.sender)?local(s.sender):s.sender)));
   const st=el('td');const r=s.result;let label=SCH_STATUS[s.status];if(s.status==='scheduled'&&s.progress)label='בשליחה '+nf.format(s.progress)+'/'+nf.format(s.recipients);st.append(el('span','tag'+(s.status==='failed'?' off':s.status==='sent'?' accent':''),label));
   if(r)st.append(el('span','sub-line',(r.accepted?nf.format(r.accepted)+' נשלחו':'')+(r.unknown?' · '+nf.format(r.unknown)+' לא ידוע':'')+(r.rejected?' · '+nf.format(r.rejected)+' נדחו':'')+(r.opted_out?' · '+nf.format(r.opted_out)+' בהסרה':'')+(r.error?' · '+r.error:'')));
   const act=el('td');if(s.status==='scheduled'&&!s.progress){const move=el('button','ghost','שינוי מועד');move.type='button';move.addEventListener('click',function(){rescheduleRow(act,s);});
