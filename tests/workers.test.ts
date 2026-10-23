@@ -6,6 +6,7 @@ import {runDue,MAX_ATTEMPTS} from '../shared/forwarding';
 import {runScheduled} from '../shared/scheduled';
 import dashboard,{handle} from '../workers/dashboard/src/index';
 import {data} from '../workers/dashboard/src/data';
+import {chats} from '../workers/dashboard/src/chats';
 import {User} from '../workers/dashboard/src/users';
 import {Env,encodeCursor,failure,parseRecipient} from '../shared/validation';
 import {PHONE_JS} from '../workers/dashboard/src/ui';
@@ -439,6 +440,11 @@ describe('D1 rows read',()=>{
   expect(m.log.at(-1)!.read).toBeLessThan(150);
   await data(new URL('https://dashboard.test/api/messages?limit=100&since='+encodeURIComponent(first.sync_cursor)),m.env,who);expect(m.log.at(-1)!.read).toBeLessThan(10);
   await data(new URL('https://dashboard.test/api/messages?limit=100&since='+encodeURIComponent(encodeCursor({t:400000,id:0}))),m.env,who);expect(m.log.at(-1)!.read).toBeLessThan(120);}});
+ it('reads one page of bot chats when opening the chats page and only changed chats when polling',async()=>{
+  await env.DB.prepare("INSERT INTO bot_threads (system_number,peer_number,started_at,last_at,updated_at) SELECT ?,'+9725099'||printf('%05d',i),i,i,i FROM (WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i<49) SELECT i FROM n)").bind(number).run();
+  for(const who of [user('alice@example.com'),user('admin@example.com','admin')]){const m=metered();
+   const first=await (await chats(new URL('https://dashboard.test/api/chats?limit=10'),m.env,who)).json() as {threads:unknown[];sync_cursor:string};expect(first.threads).toHaveLength(10);expect(m.log.at(-1)!.read).toBeLessThan(120);
+   await chats(new URL('https://dashboard.test/api/chats?since='+encodeURIComponent(first.sync_cursor)),m.env,who);expect(m.log.at(-1)!.read).toBeLessThan(10);}});
 });
 describe('Micropay submission responses',()=>{
  it('recognizes plain and JSON queue acceptance, including validate variants',()=>{for(const raw of ['OK 34556','OK 250 34556','OK VALID 34556',{status:1,message:'OK',data:{taskId:'34556'}}])expect(micropaySubmission(raw)).toEqual({submission_status:'accepted',task_id:'34556'});});

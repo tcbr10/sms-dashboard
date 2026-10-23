@@ -22,7 +22,8 @@ async function threads(p: URLSearchParams, env: Env, user: User, select: 'list'|
  const cols = select === 'list'
   ? `t.id,t.system_number,t.peer_number,t.flow_id,f.name AS flow,t.started_at,t.last_at,t.updated_at,c.data AS contact,(SELECT json_object('body',m.body,'direction',m.direction,'at',m.occurred_at,'by',m.sent_by) ${visible} ORDER BY m.occurred_at DESC,m.id DESC LIMIT 1) AS last,${STATE} AS state`
   : `EXISTS (SELECT 1 ${visible}) AS last,${STATE} AS state`;
- const conditions = ['t.system_number IN (SELECT value FROM json_each(?))']; const bindings: (string|number)[] = [...s.bindings,now,JSON.stringify(numbers)];
+ // The leading + keeps SQLite on the update-time index, so a page reads its own threads instead of sorting all of them.
+ const conditions = ['+t.system_number IN (SELECT value FROM json_each(?))']; const bindings: (string|number)[] = [...s.bindings,now,JSON.stringify(numbers)];
  const flow = p.get('flow'); if (flow) { if (!/^\d{1,9}$/.test(flow)) throw new HttpError(400,'Invalid flow'); conditions.push('t.flow_id=?'); bindings.push(Number(flow)); }
  const q = p.get('q'); if (q) { if (q.length > 200) throw new HttpError(400,'Search too long'); conditions.push('(instr(t.peer_number,?)>0 OR EXISTS (SELECT 1 FROM json_each(c.data) j WHERE instr(lower(j.value),lower(?))>0))'); bindings.push(phoneNeedle(q),q); }
  return {sql:`SELECT ${cols} FROM bot_threads t LEFT JOIN flows f ON f.id=t.flow_id LEFT JOIN contacts c ON c.number=t.peer_number WHERE ${conditions.join(' AND ')}`,bindings};

@@ -222,11 +222,11 @@ $('t-form').addEventListener('submit',async function(e){e.preventDefault();const
 $('t-text').addEventListener('keydown',function(e){if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();$('t-form').requestSubmit();}});
 
 // Live updates: changed threads, and new or changed messages of the open conversation. A changed open thread reloads
-// its side panel. Counts refresh at most every minute while something changes.
+// its side panel. Counts read every thread, so they refresh at most every 10 minutes while something changes.
 async function tick(){if(C.polling||C.loading||!C.sync)return;C.polling=true;const g=C.gen;
  try{let changed=false,openChanged=false;const p=params();p.delete('state');p.set('since',C.sync);const d=await get('/api/chats?'+p);if(g!==C.gen)return;
   for(const t of d.threads){const k=key(t);if(C.state&&t.state!==C.state){if(C.threads.delete(k))changed=true;}else{C.threads.set(k,t);changed=true;}if(C.sel&&k===key(C.sel))openChanged=true;}C.sync=d.sync_cursor;
-  if(changed)renderList();if(changed&&Date.now()-C.countsAt>60000)loadCounts();
+  if(changed)renderList();if(changed&&Date.now()-C.countsAt>600000)loadCounts();
   if(C.sel&&C.msgSync){const s=C.sel;const mp=msgQuery();mp.set('since',C.msgSync);const md=await get('/api/messages?'+mp);if(C.sel===s){for(const m of md.messages)C.msgs.set(m.id,m);C.msgSync=md.sync_cursor;if(openChanged)await loadMeta();if(md.messages.length||openChanged)renderThread(false);}}
   $('live').className='live ok';$('live-text').textContent='עדכון חי';}
  catch(e){$('live').className='live err';$('live-text').textContent=e&&e.message==='offline'?'אין חיבור':'שגיאה';}
