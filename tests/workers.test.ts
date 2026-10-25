@@ -17,7 +17,7 @@ let mf:Miniflare;let env:Env;
 const number='+972501234567',other='+972501234568',peer='+972509876543',token='a'.repeat(40),outToken='b'.repeat(40),message='שלום 👋\n& + "בדיקה" %20';
 beforeAll(async()=>{mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("test")}}',compatibilityDate:'2026-08-06',d1Databases:{DB:'sms-test'}});const bindings=await mf.getBindings();env={DB:bindings.DB as D1Database,INCOMING_TOKEN:token,OUTGOING_TOKEN:outToken};const dir=new URL('../migrations/',import.meta.url);for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(file,dir),'utf8')).split(';').filter(s=>s.trim()))await env.DB.prepare(sql).run();});
 afterAll(async()=>{await mf?.dispose();});
-beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','imports','forward_rules','deliveries','flows','conversations','bot_answers','bot_blocks','scheduled_sends','links','bot_threads','sender_users','senders','optout_codes','system_numbers'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers (number,label,active) VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
+beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','imports','forward_rules','deliveries','flows','conversations','bot_answers','bot_blocks','scheduled_sends','links','bot_threads','sender_users','senders','optout_codes','link_groups','short_links','short_link_days','system_numbers'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers (number,label,active) VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
 const user=(email:string,role:'admin'|'user'='user'):User=>({email,name:'',role,can_bulk_send:0,daily_limit:null,density:null,columns:null,test_number:null,sessions_revoked_at:null,can_edit_contacts:1});
 const ctx={waitUntil(){},passThroughOnException(){}} as unknown as ExecutionContext;
 function send(body:Record<string,unknown>,out=false,secret=out?outToken:token){return ingestion.fetch(new Request('https://ingest.test'+(out?'/events/outgoing':'/hooks/incoming'),{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+secret},body:JSON.stringify({event_id:'event-1',system_number:number,peer_number:peer,body:message,...body})}),env);}
@@ -655,4 +655,54 @@ describe('sender IDs',()=>{
   expect(((await body(req('alice@example.com','/api/scheduled'))).scheduled as {sender:string}[])[0].sender).toBe('+97235551234');
   await assign(id,[]);await env.DB.prepare('UPDATE scheduled_sends SET send_at=1').run();expect(await runScheduled({...env,MICROPAY_TOKEN:'t'},fetcher)).toBe(true);
   expect(calls).toHaveLength(0);const row=await env.DB.prepare('SELECT status,result FROM scheduled_sends').first<{status:string;result:string}>();expect(row!.status).toBe('failed');expect(JSON.parse(row!.result).error).toBe('This sender ID is not available to you');});
+});
+describe('links tab',()=>{
+ const third='+972509876544',base='https://l.test',iphone='Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1';
+ const fetcher=async()=>new Response('OK 1');
+ const req=(email:string,path:string,b?:unknown)=>handle(new Request(ORIGIN+path,b===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json',Origin:ORIGIN},body:JSON.stringify(b)}),{...env,MICROPAY_TOKEN:'t'} as Env,email,{fetcher}).catch(failure);
+ async function open(path:string,agent=iphone){const pending:Promise<unknown>[]=[];const r=await redirect(new Request(base+'/'+path,{headers:{'User-Agent':agent}}),env,p=>pending.push(p));await Promise.all(pending);return r;}
+ const groups=async()=>(await body(req('admin@example.com','/api/admin/links/groups'))).groups as {id:number;url:string;recipients:number;clicked:number;clicks:number;sent_url:string}[];
+ const general=async()=>(await body(req('admin@example.com','/api/admin/links'))) as {base:string;links:{code:string;url:string;title:string;active:number;clicks:number;auto_clicks:number;days:{day:string;clicks:number}[]}[]};
+ beforeEach(async()=>{await req('admin@example.com','/api/admin/settings',{link_base:base});});
+ it('is for admins only',async()=>{for(const [path,b] of [['/api/admin/links',undefined],['/api/admin/links/groups',undefined],['/api/admin/links/create',{url:'https://a.example.com'}],['/api/admin/links/groups/save',{id:1,url:'https://a.example.com'}]] as const)expect((await req('alice@example.com',path,b)).status).toBe(403);});
+ it('lists sent links per send and changes where all of a send\'s links lead',async()=>{
+  await req('admin@example.com','/api/send',{id:crypto.randomUUID(),system_number:number,recipients:[peer,third],body:'מבצע https://shop.example.com/old',track_links:true});
+  await env.DB.prepare('UPDATE links SET created_at=created_at-60000').run();
+  let g=await groups();expect(g).toMatchObject([{url:'https://shop.example.com/old',recipients:2,clicked:0,clicks:0,sent_url:'https://shop.example.com/old'}]);
+  const code=(await env.DB.prepare('SELECT code FROM links WHERE peer_number=?').bind(peer).first<{code:string}>())!.code;
+  expect((await open(code)).headers.get('location')).toBe('https://shop.example.com/old');await env.DB.prepare('UPDATE links SET last_click_at=last_click_at-60000').run();await open(code);await open(code,'facebookexternalhit/1.1');
+  expect((await groups())[0]).toMatchObject({clicked:1,clicks:2});
+  for(const u of ['shop.example.com','javascript:alert(1)','https://a b.com'])expect((await req('admin@example.com','/api/admin/links/groups/save',{id:g[0].id,url:u})).status).toBe(400);
+  expect((await req('admin@example.com','/api/admin/links/groups/save',{id:g[0].id,url:'https://shop.example.com/new'})).status).toBe(200);
+  expect((await open(code)).headers.get('location')).toBe('https://shop.example.com/new');
+  const other=(await env.DB.prepare('SELECT code FROM links WHERE peer_number=?').bind(third).first<{code:string}>())!.code;expect((await open(other)).headers.get('location')).toBe('https://shop.example.com/new');
+  g=await groups();expect(g[0]).toMatchObject({url:'https://shop.example.com/new',sent_url:'https://shop.example.com/old',clicked:2});
+  // The last tap came within 30 seconds of the one before, so it was not counted again.
+  expect((await env.DB.prepare('SELECT clicks FROM messages WHERE peer_number=?').bind(peer).first())).toEqual({clicks:2});
+  expect(await env.DB.prepare("SELECT target,details FROM audit_log WHERE action='link.group'").first()).toEqual({target:String(g[0].id),details:JSON.stringify({from:'https://shop.example.com/old',url:'https://shop.example.com/new',recipients:2})});});
+ it('keeps the batches of one send in one row',async()=>{const first=crypto.randomUUID();
+  for(const [id,to] of [[first,[peer]],[crypto.randomUUID(),[third]]] as const)expect((await req('admin@example.com','/api/send',{id,system_number:number,recipients:to,body:'https://a.example.com and https://b.example.com',track_links:true,bulk:true,batch_of:first})).status).toBe(200);
+  expect((await groups()).map(x=>[x.url,x.recipients]).sort()).toEqual([['https://a.example.com',2],['https://b.example.com',2]]);
+  expect((await req('admin@example.com','/api/send',{id:crypto.randomUUID(),system_number:number,recipients:[peer],body:'https://a.example.com',track_links:true,batch_of:'nope'})).status).toBe(400);
+  await env.DB.prepare('DELETE FROM link_groups').run();const many=Array.from({length:35},(_,i)=>'05090000'+String(i).padStart(2,'0'));
+  await req('admin@example.com','/api/send',{id:crypto.randomUUID(),system_number:number,recipients:many,body:'https://c.example.com',track_links:true,send_at:Date.now()+3600000});
+  await env.DB.prepare('UPDATE scheduled_sends SET send_at=1').run();await runScheduled({...env,MICROPAY_TOKEN:'t'},fetcher);await runScheduled({...env,MICROPAY_TOKEN:'t'},fetcher);
+  expect((await groups()).map(x=>[x.url,x.recipients])).toEqual([['https://c.example.com',35]]);});
+ it('creates general links with a chosen or random name, and edits, turns off and deletes them',async()=>{
+  const random=await body(req('admin@example.com','/api/admin/links/create',{url:'https://example.com/a',title:'פייסבוק'}));expect(random.code).toMatch(/^[a-z0-9]{7}$/);
+  expect(await body(req('admin@example.com','/api/admin/links/create',{url:'https://example.com/sale',name:'Sale'}))).toEqual({code:'sale'});
+  for(const n of ['sale','api','www'])expect((await req('admin@example.com','/api/admin/links/create',{url:'https://example.com',name:n})).status).toBe(409);
+  for(const n of ['a','x','-sale','sale-','מבצע','sale!','a'.repeat(41)])expect((await req('admin@example.com','/api/admin/links/create',{url:'https://example.com',name:n})).status).toBe(400);
+  expect((await req('admin@example.com','/api/admin/links/create',{url:'ftp://example.com'})).status).toBe(400);
+  await env.DB.prepare("INSERT INTO links (code,send_id,system_number,peer_number,url,created_at) VALUES ('abcdefg','s',?,?,'https://x.example.com',1)").bind(number,peer).run();
+  expect((await req('admin@example.com','/api/admin/links/create',{url:'https://example.com',name:'abcdefg'})).status).toBe(409);
+  for(const p of ['sale','SALE','sale.'])expect((await open(p)).headers.get('location')).toBe('https://example.com/sale');
+  await open('sale','curl/8.0');expect((await general()).links.find(l=>l.code==='sale')).toMatchObject({clicks:3,auto_clicks:1,days:[{clicks:3}]});
+  expect((await open(random.code as string)).headers.get('location')).toBe('https://example.com/a');
+  expect((await req('admin@example.com','/api/admin/links/save',{code:'sale',url:'https://example.com/sale2',title:'מבצע',active:true})).status).toBe(200);expect((await open('sale')).headers.get('location')).toBe('https://example.com/sale2');
+  await req('admin@example.com','/api/admin/links/save',{code:'sale',url:'https://example.com/sale2',title:'מבצע',active:false});const off=await open('sale');expect(off.status).toBe(410);expect(off.headers.get('location')).toBeNull();
+  expect((await general()).links.find(l=>l.code==='sale')).toMatchObject({clicks:4,active:0,title:'מבצע'});
+  expect((await req('admin@example.com','/api/admin/links/delete',{code:'sale'})).status).toBe(200);expect((await open('sale')).status).toBe(404);expect(await env.DB.prepare("SELECT 1 FROM short_link_days WHERE code='sale'").first()).toBeNull();
+  expect((await general()).base).toBe(base);expect((await open('nothere')).status).toBe(404);
+  expect((await env.DB.prepare("SELECT action,target FROM audit_log WHERE action LIKE 'link.%' ORDER BY id").all()).results.map(r=>(r as {action:string}).action)).toEqual(['link.create','link.create','link.update','link.update','link.delete']);});
 });

@@ -8,6 +8,7 @@ import {forwards} from './forwards';
 import {validateRules} from './scope';
 import {flows} from './flows';
 import {senders} from './senders';
+import {shortlinks} from './shortlinks';
 const DAY = 86400000;
 function email(value: unknown): string { const e = text(value,'email',254).trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw new HttpError(400,'Invalid email'); return e; }
 function name(value: unknown): string { if (value === undefined) return ''; if (typeof value !== 'string' || value.trim().length > 80) throw new HttpError(400,'Name must be at most 80 characters'); return value.trim(); }
@@ -28,6 +29,7 @@ export async function admin(request: Request, url: URL, env: Env, user: User, fe
  if (path === 'forwards' || path.startsWith('forwards/')) return forwards(request,path,env,user,fetcher);
  if (path === 'flows' || path.startsWith('flows/')) return flows(request,path,url,env,user);
  if (path === 'senders' || path.startsWith('senders/')) return senders(request,path,env,user,fetcher);
+ if (path === 'links' || path.startsWith('links/')) return shortlinks(request,path,url,env,user);
  if (request.method === 'GET') {
   if (path === 'users') { const r = await env.DB.prepare("SELECT u.email,u.name,u.role,u.active,u.can_bulk_send,u.can_edit_contacts,u.daily_limit,u.created_at,u.last_seen_at,u.test_number,u.sessions_revoked_at,(SELECT json_group_array(json_object('number',n.system_number,'can_send',n.can_send,'view_from',n.view_from,'view_rules',json(n.view_rules))) FROM user_numbers n WHERE n.email=u.email) AS numbers,(SELECT json_group_array(su.sender_id) FROM sender_users su WHERE su.email=u.email) AS senders,(SELECT COALESCE(SUM(s.recipients),0) FROM sends s WHERE s.email=u.email AND s.created_at>? AND s.status!='rejected') AS sent_24h FROM users u ORDER BY u.role,u.name,u.email").bind(Date.now()-DAY).all<Record<string,unknown>>(); return json({users:r.results.map(u => ({...u,numbers:JSON.parse(String(u.numbers)),senders:JSON.parse(String(u.senders))})),access:{configured:accessConfigured(env),last:await lastSync(env)}}); }
   if (path === 'numbers') return json({numbers:(await env.DB.prepare('SELECT s.number,s.label,s.active,s.bot_reply,(SELECT COUNT(*) FROM user_numbers u WHERE u.system_number=s.number) AS users FROM system_numbers s ORDER BY s.active DESC,s.label,s.number').all()).results});

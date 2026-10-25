@@ -21,9 +21,10 @@ The README documents setup, routes, field mapping and operations in detail.
 | Ingest | Deployed (version `e3fb6dde`) with sender IDs in scheduled sends, bot chat threads and bot notes on messages, tracked links in scheduled sends, scheduled sends on the cron, variables in bot replies, lenient JSON for Micropay automations (multi-line messages), bot replies through the response or Micropay's API, the two-secret auth, opt-out detection, bot replies, webhook forwarding and an every-minute cron for delivery retries. `INCOMING_TOKEN` and `OUTGOING_TOKEN` are set as Worker secrets. The owner holds the values; they are not stored anywhere in the repo. |
 | Micropay | A Dynamic Text service on the owner's number posts JSON to `/hooks/micropay/incoming?token=<INCOMING_TOKEN>`. The owner confirmed it works after setup. |
 | Links | Deployed (version `b2ebc367`, with the opt-out page) on its own subdomain of the owner's domain; `link_base` is set in Settings. Checked live: robots.txt, 404 for unknown codes, 302 and click counting on a temporary link (deleted). A tap from a phone has not been tried yet. |
+| Links tab | Built, tested and checked in the local preview; **not deployed**. Needs `0014`, then the links Worker, ingest and the dashboard. |
 | Sender IDs | Deployed 2026-10-23. `0013` rebuilt `opt_outs` with all 20 rows unchanged (a copy from before is in the git-ignored `backups/`). Checked live: the opt-out page asks and does not opt out on opening (temporary code, deleted). Still to do by the owner: set "טקסט קישור הסרה", then verify a number on the "זיהוי שולח" tab, which is the first real call to senderVerify.php. |
 | Bot chats | Deployed 2026-10-23. `0012` filled 593 threads from past bot conversations. Opening the page reads about 190 rows on the live data (checked with the page's query). The page itself has not been opened by the owner yet. |
-| D1 | `0001` to `0013` applied. On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
+| D1 | `0001` to `0013` applied (`0014` waits for the links tab rollout). On 2026-10-07 the account hit the free plan's 5M rows read per day and D1 refused every query (including ingestion) until midnight UTC; after the fix, polls read 9–27 rows each and the database reads about 250K rows a day. One system number registered; the owner is an admin, and further users are managed on the admin page. |
 | Outgoing logging | Not wired yet. Nothing posts to `/events/outgoing`, so the dashboard shows incoming messages only. |
 
 ## Local-only state on the owner's machine
@@ -53,9 +54,10 @@ The README documents setup, routes, field mapping and operations in detail.
 | `shared/dispatch.ts` | Sending: prepareSend (permissions, recipients, variables, flow) and executeSend (opt-outs, daily limit, Micropay calls, records, bot state); used by the send button and scheduled sends |
 | `shared/scheduled.ts` | Scheduled sends, run by the ingest cron one batch at a time |
 | `shared/links.ts` | Tracked links: finding links (`findLinks`, and `LINKS_JS` for the browser, kept identical), codes, replacing links per recipient, classifying and counting clicks |
-| `workers/links/src/index.ts` | Links Worker: `GET /<code>` redirect, click counting after the response, 404 page, robots.txt; `/x/<code>` opt-out page (GET asks, POST opts out) |
+| `workers/links/src/index.ts` | Links Worker: `GET /<code>` redirect (SMS links via their group, then general links), click counting after the response, 404 page, robots.txt; `/x/<code>` opt-out page (GET asks, POST opts out) |
 | `shared/records.ts` | audit() and sentLast24h(), shared by both Workers |
 | `shared/bot.ts` | Bot engine: conversation state, option matching, replies, answers |
+| `workers/dashboard/src/shortlinks.ts` | `/api/admin/links*` (admins only): general short links (create, edit, on/off, delete, 30-day counts) and the groups of links in sent messages (list, change destination) |
 | `workers/dashboard/src/senders.ts` | `/api/admin/senders*` (admins only): Micropay senderVerify (code, verify), text names, who may use each sender ID, removal |
 | `workers/dashboard/src/chats.ts` | `/api/chats` (threads, live updates by `since`), `/api/chats/counts` (by state, plus flows), `/api/chats/thread` (bot state, answers and flows of one chat); scoped like messages |
 | `workers/dashboard/src/chats-page.ts` | Bot chats page: list, chat with the bot's tags and answer options, side panel, manual reply |
@@ -68,7 +70,7 @@ The README documents setup, routes, field mapping and operations in detail.
 | `workers/dashboard/src/admin-page.ts` | Admin page |
 | `shared/validation.ts` | `Env`, phone and recipient normalization, body reading, cursors |
 | `shared/settings.ts` | Settings defaults and validation, opt-out word matching (also used by ingest) |
-| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id`; `0007_forwarding_bot.sql` forwarding rules and deliveries, bot flows, conversations, answers and blocks; `0008_bot_reply_via.sql` per-number bot reply method; `0009_view_restrictions.sql` per-assignment view start and conditions; `0010_scheduled_sends.sql` scheduled sends; `0011_tracked_links.sql` links (WITHOUT ROWID, one written row per link), click columns on messages, `track_links` on scheduled sends; `0012_bot_threads.sql` bot chat threads (filled from existing bot messages, conversations and answers) and `messages.bot`; `0013_senders.sql` sender IDs and their users, sender on sends, scheduled sends and messages, opt-out codes, and `opt_outs` rebuilt to allow the source `link` |
+| `migrations/` | `0001_initial.sql` schema; `0002_users_and_sending.sql` users, settings, opt-outs, sends, activity log; `0003_contacts_lists.sql` contacts, lists, user columns, test numbers, session revocation, test sends; `0004_user_contacts.sql` the per-user contact editing permission; `0005_read_indexes.sql` time and customer indexes; `0006_message_imports.sql` imports table and `messages.import_id`; `0007_forwarding_bot.sql` forwarding rules and deliveries, bot flows, conversations, answers and blocks; `0008_bot_reply_via.sql` per-number bot reply method; `0009_view_restrictions.sql` per-assignment view start and conditions; `0010_scheduled_sends.sql` scheduled sends; `0011_tracked_links.sql` links (WITHOUT ROWID, one written row per link), click columns on messages, `track_links` on scheduled sends; `0012_bot_threads.sql` bot chat threads (filled from existing bot messages, conversations and answers) and `messages.bot`; `0014_link_management.sql` link groups (one per send and address; `links.group_id`), general short links and their daily counts; `0013_senders.sql` sender IDs and their users, sender on sends, scheduled sends and messages, opt-out codes, and `opt_outs` rebuilt to allow the source `link` |
 | `tests/workers.test.ts` | Miniflare D1 tests: ingest, isolation, table queries, access, admin, sending (fake Micropay) |
 | `scripts/preview.ts` | Local preview with seeded data, live inserts, a fake Micropay and the links Worker on port 8792 (`npm run preview`; `PREVIEW_USER=agent@example.com` for a regular user) |
 
@@ -111,6 +113,8 @@ The README documents setup, routes, field mapping and operations in detail.
 - **Sender IDs are managed by admins only, and assigned per user** (any number the user may send from). Replies to a sender ID don't reach this system, so it can't start a bot flow, and several recipients need a personal opt-out link: Israeli law requires a working way to refuse advertising, and "reply הסר" doesn't work there.
 - **The opt-out link asks before it acts.** GET shows a button and only the POST opts out, because previews and scanners open links. One code per customer (`optout_codes`) keeps sends from writing a row per recipient.
 - **No API lists Micropay's sender IDs,** so this system keeps its own list. A text name can't be approved through the API; its status comes from the first send.
+- **A sent link's address lives on its group** (`link_groups`), not on each recipient's row, so changing where a send's links lead is one write, and the links tab reads groups instead of every recipient link. `links.url` keeps what was sent.
+- **General links share the SMS link address** (the owner's choice) and are looked up after SMS codes. Their names are lowercase, so a random general code never matches a mixed-case SMS code by accident; a name is checked against both tables when it is created.
 - **Tracked links are self-hosted** on a third Worker rather than a shortener service: each recipient needs a link of their own, and the services' free plans allow 5 to 25 links a month (Short.io about 1,000 in total). The links Worker is separate from ingest so public click traffic can never affect Micropay's route.
 - **The short-link address is a D1 setting (`link_base`), not a Worker variable,** because both the dashboard (send button) and ingest (scheduled sends) create links. It also keeps the hostname out of the repo.
 - **Clicks are written onto `messages`** (`clicks`, `auto_clicks`, `clicked_at`, plus `updated_at`), so the table and live polling read them without a join. The links table has no index besides its primary key; a per-send report (phase 2) will need one on `send_id`.
@@ -208,6 +212,12 @@ Found on 2026-10-13: messages on the bot's number come from a Micropay automatio
 1. Done: applied `0010`.
 2. Done: deployed ingest, then the dashboard.
 3. Optional: turn on "הודעות אישיות בקריאה אחת" in Settings after a personalized test send to the owner's phone works.
+
+## Rollout of the links tab
+
+1. Apply `0014` (`npm run db:migrate`) before deploying: sends write `link_groups` and `links.group_id`, and the links Worker reads them.
+2. Deploy the links Worker, then ingest (scheduled sends), then the dashboard.
+3. On the "קישורים" tab, create a test link and open it.
 
 ## Rollout of sender IDs
 

@@ -629,7 +629,7 @@ $('c-form').addEventListener('submit',async function(e){e.preventDefault();if(C.
  if(!C.batches){const size=(personal||track||(from&&r.list.length>1))&&!ME.settings.micropay_listjson?PERSONAL_BATCH:r.list.length;C.batches=[];for(let i=0;i<r.list.length;i+=size)C.batches.push({id:C.batches.length?crypto.randomUUID():C.id,list:r.list.slice(i,i+size),done:false});}
  const total={sent:0,accepted:0,rejected:0,unknown:0,opted:0,duplicate:false};
  try{for(let i=0;i<C.batches.length;i++){const b=C.batches[i];if(b.done)continue;if(C.batches.length>1)$('c-send-text').textContent='שולח '+nf.format(i+1)+' מתוך '+nf.format(C.batches.length)+'…';
-   const d=await post('/api/send',{id:b.id,system_number:$('c-from').value,recipients:b.list,body:body,flow_id:flow?Number(flow):null,stop_bot:stop,track_links:track,sender_id:senderId,bulk:r.list.length>1});
+   const d=await post('/api/send',{id:b.id,system_number:$('c-from').value,recipients:b.list,body:body,flow_id:flow?Number(flow):null,stop_bot:stop,track_links:track,sender_id:senderId,bulk:r.list.length>1,batch_of:C.batches.length>1?C.batches[0].id:null});
    if(d.status==='rejected'&&!d.duplicate){b.id=crypto.randomUUID();if(i===0)C.id=b.id;throw new Error('הספק דחה את השליחה'+(d.error?': '+d.error:'')+(total.sent?' ('+nf.format(total.sent)+' נמענים כבר קיבלו את ההודעה; שליחה חוזרת תמשיך מהמקום שנעצר)':''));}
    b.done=true;total.sent+=d.sent;total.duplicate=total.duplicate||!!d.duplicate;if(d.skipped)total.opted+=d.skipped.opted_out||0;
    if(d.counts){total.accepted+=d.counts.accepted;total.rejected+=d.counts.rejected;total.unknown+=d.counts.unknown;}else total[d.status==='accepted'?'accepted':'unknown']+=d.sent;}

@@ -1,5 +1,14 @@
 import {header,shell,svg} from './ui';
 const css = String.raw`
+.spark{display:block}
+.spark rect{fill:var(--accent)}
+.spark rect.z{fill:var(--line)}
+.lk-short{display:inline-flex;align-items:center;gap:4px;direction:ltr;unicode-bidi:isolate;font-weight:600}
+.lk-short .ghost{height:28px;padding:0 6px}
+.lk-url{display:block;max-width:360px;direction:ltr;unicode-bidi:isolate;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lk-prefix{display:flex;align-items:center;gap:6px;direction:ltr}
+.lk-prefix span{color:var(--muted);white-space:nowrap}
+.lk-prefix input{flex:1}
 .tabs{display:flex;gap:2px;overflow-x:auto;border-bottom:1px solid var(--line)}
 .tabs button{padding:9px 14px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--ink2);font-weight:550;white-space:nowrap;cursor:pointer}
 .tabs button:hover{color:var(--ink)}
@@ -140,6 +149,27 @@ const userDialog = String.raw`
  <div class="dialog-foot"><span class="hint" id="ci-status"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="ci-go">ייבוא</button></div>
 </form></dialog>
 `;
+// Links tab: a general short link (create or edit) and a new destination for a link in a sent message.
+const linkDialogs = String.raw`
+<dialog id="lk-dlg" aria-labelledby="lk-title"><form class="dialog-body" id="lk-form" novalidate>
+ <div class="dialog-head"><h2 id="lk-title"></h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <label class="fld"><span>כתובת היעד</span><input id="lk-url" dir="ltr" maxlength="2000" placeholder="https://example.co.il/page"></label>
+ <label class="fld"><span>כותרת (לשימוש פנימי)</span><input id="lk-label" maxlength="100" placeholder="לדוגמה: מבצע סוף עונה, פייסבוק"></label>
+ <div class="fld" id="lk-name-row"><label class="label" for="lk-name">שם הקישור (לא חובה)</label><div class="lk-prefix"><span id="lk-base"></span><input id="lk-name" maxlength="40" placeholder="sale" autocomplete="off"></div><p class="hint">אותיות באנגלית קטנות, ספרות ו-, בין 2 ל-40 תווים. בלי שם נוצר קוד אקראי. אי אפשר לשנות את השם אחרי היצירה.</p></div>
+ <div class="fld" id="lk-edit-row" hidden><div class="row"><span class="lk-short" id="lk-short"></span><button type="button" class="ghost" id="lk-copy">`+svg('copy')+String.raw`העתקה</button></div><label class="check"><input type="checkbox" id="lk-active">פעיל (קישור כבוי מציג "הקישור אינו פעיל")</label><p class="hint" id="lk-stats"></p></div>
+ <div class="banner" id="lk-error" role="alert" hidden></div>
+ <div class="dialog-foot"><button type="button" class="ghost danger" id="lk-delete" hidden>מחיקת הקישור</button><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="lk-save"></button></div>
+</form></dialog>
+<dialog id="lg-dlg" aria-labelledby="lg-title"><form class="dialog-body" id="lg-form" novalidate>
+ <div class="dialog-head"><h2 id="lg-title">שינוי יעד של קישור שנשלח</h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <p class="hint" id="lg-info"></p>
+ <div class="fld"><span class="label">יעד נוכחי</span><span class="lk-url" id="lg-current"></span><span class="hint" id="lg-original" hidden></span></div>
+ <label class="fld"><span>יעד חדש</span><input id="lg-url" dir="ltr" maxlength="2000"></label>
+ <p class="hint" id="lg-note"></p>
+ <div class="banner" id="lg-error" role="alert" hidden></div>
+ <div class="dialog-foot"><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn">שינוי היעד</button></div>
+</form></dialog>
+`;
 // Sender IDs: add a number (code sent by Micropay, then typed back), add a text name, and edit who may use one.
 const senderDialogs = String.raw`
 <dialog id="sp-dlg" aria-labelledby="sp-title"><form class="dialog-body" id="sp-form" novalidate>
@@ -177,7 +207,7 @@ const senderDialogs = String.raw`
 `;
 const body = header('admin',false) + String.raw`
 <main class="wrap">
- <nav class="tabs" role="tablist" aria-label="ניהול"><button type="button" role="tab" data-tab="users">משתמשים</button><button type="button" role="tab" data-tab="numbers">מספרים</button><button type="button" role="tab" data-tab="senders">זיהוי שולח</button><button type="button" role="tab" data-tab="contacts">אנשי קשר</button><button type="button" role="tab" data-tab="optouts">רשימת הסרה</button><button type="button" role="tab" data-tab="imports">ייבוא הודעות</button><button type="button" role="tab" data-tab="bot">בוט</button><button type="button" role="tab" data-tab="forwards">העברה ל-Webhook</button><button type="button" role="tab" data-tab="settings">הגדרות</button><button type="button" role="tab" data-tab="audit">יומן פעולות</button></nav>
+ <nav class="tabs" role="tablist" aria-label="ניהול"><button type="button" role="tab" data-tab="users">משתמשים</button><button type="button" role="tab" data-tab="numbers">מספרים</button><button type="button" role="tab" data-tab="senders">זיהוי שולח</button><button type="button" role="tab" data-tab="links">קישורים</button><button type="button" role="tab" data-tab="contacts">אנשי קשר</button><button type="button" role="tab" data-tab="optouts">רשימת הסרה</button><button type="button" role="tab" data-tab="imports">ייבוא הודעות</button><button type="button" role="tab" data-tab="bot">בוט</button><button type="button" role="tab" data-tab="forwards">העברה ל-Webhook</button><button type="button" role="tab" data-tab="settings">הגדרות</button><button type="button" role="tab" data-tab="audit">יומן פעולות</button></nav>
  <div class="banner panel" id="error" role="alert" hidden><span id="error-text"></span></div>
  <section class="panel" data-panel="users" hidden>
   <div class="toolbar"><label class="field search">`+svg('search')+String.raw`<input id="u-q" type="search" placeholder="חיפוש לפי שם או אימייל" aria-label="חיפוש משתמשים"></label><span class="hint end" id="u-access" hidden></span><button type="button" class="ghost" id="u-access-sync" hidden>סנכרון עם Cloudflare</button><button type="button" class="btn" id="u-add">`+svg('plus')+String.raw`הוספת משתמש</button></div>
@@ -191,6 +221,15 @@ const body = header('admin',false) + String.raw`
   <div class="toolbar"><span class="hint">מה שהנמען רואה כשולח במקום מספר המערכת. רק מנהלים מוסיפים ומאמתים שולחים, ובוחרים מי מהמשתמשים רשאי לשלוח בשם כל אחד.</span><button type="button" class="ghost end" id="sd-add-name">הוספת שם שולח</button><button type="button" class="btn" id="sd-add-phone">`+svg('plus')+String.raw`הוספת מספר שולח</button></div>
   <div class="table-wrap"><table class="list"><thead><tr><th><span>שולח</span></th><th><span>סוג</span></th><th><span>תיאור</span></th><th><span>מצב</span></th><th><span>משתמשים מורשים</span></th></tr></thead><tbody id="sd-rows"></tbody></table></div>
   <div class="foot"><span></span><span>תשובות לשולח כזה לא מגיעות למערכת, לכן אי אפשר להתחיל ממנו תהליך בוט, ובשליחה לכמה נמענים מתווסף קישור הסרה אישי במקום "השיבו הסר".</span></div>
+ </section>
+ <section class="panel" data-panel="links" hidden>
+  <div class="banner" id="l-nobase" hidden>כדי ליצור ולהשתמש בקישורים מקוצרים צריך להגדיר "כתובת הקישורים המקוצרים" בלשונית ההגדרות.</div>
+  <div class="toolbar"><label class="field search">`+svg('search')+String.raw`<input id="l-q" type="search" placeholder="חיפוש לפי שם, כתובת יעד או כותרת" aria-label="חיפוש קישורים"></label><button type="button" class="btn end" id="l-add">`+svg('plus')+String.raw`קישור חדש</button></div>
+  <div class="table-wrap"><table class="list"><thead><tr><th><span>קישור</span></th><th><span>יעד</span></th><th><span>לחיצות</span></th><th><span>30 ימים</span></th><th><span>לחיצה אחרונה</span></th><th><span>סטטוס</span></th></tr></thead><tbody id="l-rows"></tbody></table></div>
+  <div class="section-title">קישורים בהודעות שנשלחו</div>
+  <div class="table-wrap"><table class="list"><thead><tr><th><span>זמן</span></th><th><span>מספר</span></th><th><span>נשלח על ידי</span></th><th><span>יעד</span></th><th><span>נמענים</span></th><th><span>לחצו</span></th><th><span>לחיצות</span></th><th><span></span></th></tr></thead><tbody id="lg-rows"></tbody></table>
+  <div class="more-row" id="lg-more-row" hidden><button type="button" class="ghost" id="lg-more">טעינת שליחות נוספות</button></div></div>
+  <div class="foot"><span>לחיצות: של אנשים · פתיחות אוטומטיות (תצוגות מקדימות וסורקים)</span><span>שינוי יעד של קישור בהודעה שנשלחה חל מיד על הקישורים האישיים של כל הנמענים בשליחה, והלחיצות ממשיכות להיספר לכל נמען.</span></div>
  </section>
  <section class="panel" data-panel="contacts" hidden>
   <div class="toolbar"><label class="field search">`+svg('search')+String.raw`<input id="c-q" type="search" placeholder="חיפוש לפי מספר או פרטים" aria-label="חיפוש אנשי קשר"></label><label class="ghost end" id="c-import-btn">`+svg('file')+String.raw`ייבוא מקובץ<input type="file" id="c-file" accept=".csv,.txt,.xlsx" hidden></label><button type="button" class="ghost" id="c-fields">`+svg('columns')+String.raw`ניהול שדות</button><button type="button" class="btn" id="c-add">`+svg('plus')+String.raw`הוספת איש קשר</button></div>
@@ -237,10 +276,10 @@ const body = header('admin',false) + String.raw`
   <div class="more-row" id="a-more-row" hidden><button type="button" class="ghost" id="a-more">טעינת רשומות נוספות</button></div></div>
  </section>
 </main>
-`+userDialog+senderDialogs;
+`+userDialog+senderDialogs+linkDialogs;
 const script = String.raw`
-const TABS=['users','numbers','senders','contacts','optouts','imports','bot','forwards','settings','audit'];
-const ACTIONS={'sender.add':'שולח נוסף','sender.update':'שולח עודכן','sender.delete':'שולח הוסר','sender.code':'נשלח קוד אימות לשולח','user.create':'משתמש נוסף','user.update':'משתמש עודכן','user.delete':'משתמש נמחק','number.create':'מספר נוסף','number.update':'מספר עודכן','settings.update':'ההגדרות עודכנו','optout.add':'נוספו לרשימת ההסרה','optout.remove':'הוסר מרשימת ההסרה','send':'שליחת הודעה','export':'ייצוא הודעות','user.disconnect':'ניתוק משתמש','user.logout':'התנתקות','access.sync':'סנכרון Cloudflare Access','messages.import':'ייבוא הודעות','send.schedule':'שליחה תוזמנה','send.cancel':'שליחה מתוזמנת בוטלה','send.reschedule':'מועד שליחה שונה','flow.save':'תהליך בוט נשמר','flow.delete':'תהליך בוט נמחק','bot.block':'הבוט הושבת ללקוח','bot.unblock':'הבוט הופעל מחדש ללקוח','forward.save':'כלל העברה נשמר','forward.delete':'כלל העברה נמחק','forward.test':'בדיקת Webhook','forward.secret':'מפתח חתימה הוחלף','forward.resend':'שליחה מחדש ל-Webhook','messages.import.undo':'ביטול ייבוא הודעות','contact.save':'איש קשר נשמר','contact.delete':'איש קשר נמחק','contacts.import':'ייבוא אנשי קשר','list.save':'רשימת תפוצה נשמרה','list.delete':'רשימת תפוצה נמחקה'};
+const TABS=['users','numbers','senders','links','contacts','optouts','imports','bot','forwards','settings','audit'];
+const ACTIONS={'link.create':'קישור נוצר','link.update':'קישור עודכן','link.delete':'קישור נמחק','link.group':'יעד של קישור שנשלח שונה','sender.add':'שולח נוסף','sender.update':'שולח עודכן','sender.delete':'שולח הוסר','sender.code':'נשלח קוד אימות לשולח','user.create':'משתמש נוסף','user.update':'משתמש עודכן','user.delete':'משתמש נמחק','number.create':'מספר נוסף','number.update':'מספר עודכן','settings.update':'ההגדרות עודכנו','optout.add':'נוספו לרשימת ההסרה','optout.remove':'הוסר מרשימת ההסרה','send':'שליחת הודעה','export':'ייצוא הודעות','user.disconnect':'ניתוק משתמש','user.logout':'התנתקות','access.sync':'סנכרון Cloudflare Access','messages.import':'ייבוא הודעות','send.schedule':'שליחה תוזמנה','send.cancel':'שליחה מתוזמנת בוטלה','send.reschedule':'מועד שליחה שונה','flow.save':'תהליך בוט נשמר','flow.delete':'תהליך בוט נמחק','bot.block':'הבוט הושבת ללקוח','bot.unblock':'הבוט הופעל מחדש ללקוח','forward.save':'כלל העברה נשמר','forward.delete':'כלל העברה נמחק','forward.test':'בדיקת Webhook','forward.secret':'מפתח חתימה הוחלף','forward.resend':'שליחה מחדש ל-Webhook','messages.import.undo':'ביטול ייבוא הודעות','contact.save':'איש קשר נשמר','contact.delete':'איש קשר נמחק','contacts.import':'ייבוא אנשי קשר','list.save':'רשימת תפוצה נשמרה','list.delete':'רשימת תפוצה נמחקה'};
 const SEND_STATUS={accepted:'התקבלה',rejected:'נדחתה',unknown:'לא ידוע',sending:'בשליחה'};
 let USERS=[],NUMBERS=[],SENDERS=[],SETTINGS=null,OPTOUTS=[],CONTACTS=[],auditBefore=null,importRows=null,importMode='update';
 function error(e){$('error').hidden=false;$('error-text').textContent=message(e);}
@@ -249,7 +288,7 @@ function cell(text,cls){return el('td',cls,text);}
 function seen(ms){return ms?shortFmt.format(ms):'טרם התחבר';}
 function showTab(t){if(!TABS.includes(t))t='users';for(const b of document.querySelectorAll('[data-tab]'))b.setAttribute('aria-selected',String(b.dataset.tab===t));
  for(const p of document.querySelectorAll('[data-panel]'))p.hidden=p.dataset.panel!==t;if(location.hash!=='#'+t)history.replaceState(null,'','#'+t);$('error').hidden=true;
- ({users:loadUsers,numbers:loadNumbers,senders:loadSenders,contacts:loadContacts,optouts:loadOptouts,imports:loadImports,bot:loadFlows,forwards:loadForwards,settings:loadSettings,audit:function(){return loadAudit(true);}})[t]().catch(error);}
+ ({users:loadUsers,numbers:loadNumbers,senders:loadSenders,links:loadLinks,contacts:loadContacts,optouts:loadOptouts,imports:loadImports,bot:loadFlows,forwards:loadForwards,settings:loadSettings,audit:function(){return loadAudit(true);}})[t]().catch(error);}
 for(const b of document.querySelectorAll('[data-tab]'))b.addEventListener('click',function(){showTab(b.dataset.tab);});
 for(const b of document.querySelectorAll('[data-close]'))b.addEventListener('click',function(){b.closest('dialog').close();});
 // Connected: seen in the last two minutes and not disconnected since.
@@ -332,6 +371,55 @@ $('ud-disconnect').addEventListener('click',async function(){const email=$('ud-e
  const a=await confirmAction('ניתוק משתמש','לנתק את '+email+'? החיבור הנוכחי שלו יסתיים מיד והוא יצטרך להתחבר מחדש עם קוד חד-פעמי.','ניתוק','וגם להשבית את המשתמש, כדי שלא יוכל להתחבר שוב');if(!a)return;
  try{const d=await post('/api/admin/users/disconnect',{email:email,disable:a.checked});accessResult(a.checked?'המשתמש נותק והושבת':'המשתמש נותק',d.access);await loadUsers();}catch(err){error(err);}});
 
+// Links tab (admins only on the server too). General links live at the short link address with a chosen or random name;
+// links in sent messages are listed per send and address, and their destination can be changed after sending.
+let LINKS=[],LBASE='',LSINCE='',GROUPS=[],gNext=null,LK=null,LG=null;
+const LINK_ERRORS={'This name is taken':'השם תפוס. בחרו שם אחר.','Enter a full address starting with https://':'יש להזין כתובת מלאה שמתחילה ב-https://','Title must be at most 100 characters':'הכותרת ארוכה מדי (עד 100 תווים).'};
+function linkError(id,e){const m=e&&e.message||'';dlgError(id,LINK_ERRORS[m]?new Error(LINK_ERRORS[m]):/^A name has/.test(m)?new Error('השם צריך 2 עד 40 אותיות באנגלית קטנות, ספרות או -, בלי - בהתחלה או בסוף.'):e);}
+function shortUrl(code){return LBASE+'/'+code;}
+function copyText(t){navigator.clipboard.writeText(t).then(function(){toast('הקישור הועתק');},function(){toast(t);});}
+async function loadLinks(){const r=await Promise.all([get('/api/admin/links'),get('/api/admin/links/groups'),get('/api/admin/numbers')]);LINKS=r[0].links;LBASE=r[0].base;LSINCE=r[0].since;GROUPS=r[1].groups;gNext=r[1].next;NUMBERS=r[2].numbers;
+ $('l-nobase').hidden=!!LBASE;$('l-add').disabled=!LBASE;renderLinks();renderGroups();}
+// Clicks by people for each of the last 30 days, as small bars (empty days drawn faint).
+function spark(days){const ns='http://www.w3.org/2000/svg';const svg=document.createElementNS(ns,'svg');svg.setAttribute('class','spark');svg.setAttribute('width','90');svg.setAttribute('height','22');svg.setAttribute('viewBox','0 0 90 22');
+ const map=new Map(days.map(function(d){return [d.day,d.clicks];}));let max=1;for(const v of map.values())max=Math.max(max,v);let total=0;
+ for(let i=0;i<30;i++){const day=shift(LSINCE,i);const v=map.get(day)||0;total+=v;const h=v?Math.max(2,Math.round(v/max*20)):1;const r=document.createElementNS(ns,'rect');r.setAttribute('x',String(i*3));r.setAttribute('y',String(22-h));r.setAttribute('width','2');r.setAttribute('height',String(h));if(!v)r.setAttribute('class','z');svg.append(r);}
+ svg.setAttribute('role','img');svg.setAttribute('aria-label',nf.format(total)+' לחיצות ב-30 ימים');return svg;}
+function renderLinks(){const q=$('l-q').value.trim().toLowerCase();const body=$('l-rows');body.replaceChildren();
+ for(const l of LINKS){if(q&&(l.code+' '+l.url+' '+l.title).toLowerCase().indexOf(q)<0)continue;const tr=el('tr','click');tr.tabIndex=0;tr.dataset.link=l.code;
+  const who=el('td');const sh=el('span','lk-short','/'+l.code);const cp=el('button','ghost');cp.type='button';cp.setAttribute('aria-label','העתקת '+shortUrl(l.code));cp.append(icon('copy'));cp.addEventListener('click',function(e){e.stopPropagation();copyText(shortUrl(l.code));});sh.append(cp);who.append(sh);if(l.title)who.append(el('span','sub-line',l.title));
+  const to=el('td');const u=el('span','lk-url',l.url);u.title=l.url;to.append(u);const sp=el('td');sp.append(spark(l.days));
+  const st=el('td');st.append(el('span','tag'+(l.active?'':' off'),l.active?'פעיל':'כבוי'));
+  tr.append(who,to,cell(nf.format(l.clicks)+(l.auto_clicks?' · '+nf.format(l.auto_clicks):'')),sp,cell(l.last_click_at?shortFmt.format(l.last_click_at):'—','muted'),st);body.append(tr);}
+ if(!body.children.length){const tr=el('tr');const td=cell(q?'לא נמצאו קישורים':'עדיין אין קישורים כלליים. "קישור חדש" יוצר קישור קצר לכל כתובת, לשימוש בכל מקום.','muted');td.colSpan=6;tr.append(td);body.append(tr);}}
+function renderGroups(){const body=$('lg-rows');body.replaceChildren();
+ for(const g of GROUPS){const tr=el('tr');const to=el('td');const u=el('span','lk-url',g.url);u.title=g.url;to.append(u);if(g.sent_url&&g.sent_url!==g.url)to.append(el('span','sub-line','היעד שונה אחרי השליחה'));
+  const by=el('td');by.append(el('span','',g.created_by||'—'));if(g.sender)by.append(el('span','sub-line','בשם '+(/^[+][0-9]+$/.test(g.sender)?local(g.sender):g.sender)));if(g.is_test)by.append(el('span','tag','בדיקה'));
+  const pct=g.recipients?Math.round(g.clicked/g.recipients*100):0;const act=el('td');const b=el('button','ghost','שינוי יעד');b.type='button';b.addEventListener('click',function(){openGroup(g);});act.append(b);
+  tr.append(cell(shortFmt.format(g.created_at),'muted'),cell(labelOf(g.system_number)),by,to,cell(nf.format(g.recipients)),cell(nf.format(g.clicked)+' ('+pct+'%)'),cell(nf.format(g.clicks)+(g.auto_clicks?' · '+nf.format(g.auto_clicks):'')),act);body.append(tr);}
+ if(!GROUPS.length){const tr=el('tr');const td=cell('עדיין לא נשלחו הודעות עם "קיצור ומעקב קישורים".','muted');td.colSpan=8;tr.append(td);body.append(tr);}
+ $('lg-more-row').hidden=!gNext;}
+$('lg-more').addEventListener('click',async function(){const b=this;b.disabled=true;try{const d=await get('/api/admin/links/groups?before='+encodeURIComponent(gNext));GROUPS=GROUPS.concat(d.groups);gNext=d.next;renderGroups();}catch(e){error(e);}finally{b.disabled=false;}});
+$('l-q').addEventListener('input',renderLinks);
+$('l-rows').addEventListener('click',function(e){const tr=e.target.closest('tr[data-link]');if(tr)openLink(tr.dataset.link);});
+$('l-rows').addEventListener('keydown',function(e){const tr=e.target.closest('tr[data-link]');if(tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openLink(tr.dataset.link);}});
+$('l-add').addEventListener('click',function(){openLink(null);});
+function openLink(code){const l=code?LINKS.find(function(x){return x.code===code;}):null;LK=l;$('lk-title').textContent=l?'עריכת קישור':'קישור חדש';$('lk-save').textContent=l?'שמירה':'יצירת הקישור';
+ $('lk-url').value=l?l.url:'';$('lk-label').value=l?l.title:'';$('lk-name').value='';$('lk-base').textContent=LBASE+'/';$('lk-name-row').hidden=!!l;$('lk-edit-row').hidden=!l;$('lk-delete').hidden=!l;$('lk-error').hidden=true;
+ if(l){$('lk-short').textContent=shortUrl(l.code);$('lk-active').checked=!!l.active;$('lk-stats').textContent=nf.format(l.clicks)+' לחיצות של אנשים · '+nf.format(l.auto_clicks)+' פתיחות אוטומטיות · נוצר על ידי '+l.created_by+' ב-'+shortFmt.format(l.created_at)+(l.updated_at!==l.created_at?' · עודכן '+shortFmt.format(l.updated_at):'');}
+ $('lk-dlg').showModal();$('lk-url').focus();}
+$('lk-copy').addEventListener('click',function(){if(LK)copyText(shortUrl(LK.code));});
+$('lk-form').addEventListener('submit',async function(e){e.preventDefault();$('lk-error').hidden=true;const b=$('lk-save');b.disabled=true;
+ try{if(LK){await post('/api/admin/links/save',{code:LK.code,url:$('lk-url').value.trim(),title:$('lk-label').value.trim(),active:$('lk-active').checked});$('lk-dlg').close();toast('הקישור עודכן');}
+  else{const d=await post('/api/admin/links/create',{url:$('lk-url').value.trim(),title:$('lk-label').value.trim(),name:$('lk-name').value.trim()||null});$('lk-dlg').close();copyText(shortUrl(d.code));}
+  await loadLinks();}
+ catch(err){linkError('lk-error',err);}finally{b.disabled=false;}});
+$('lk-delete').addEventListener('click',async function(){const l=LK;if(!await confirmAction('מחיקת הקישור','למחוק את '+shortUrl(l.code)+'? מי שילחץ עליו יראה "הקישור לא נמצא", והשם יתפנה לשימוש חוזר. כדי להפסיק אותו בלי לשחרר את השם, אפשר לכבות אותו במקום.','מחיקה'))return;
+ try{await post('/api/admin/links/delete',{code:l.code});$('lk-dlg').close();toast('הקישור נמחק');await loadLinks();}catch(err){linkError('lk-error',err);}});
+function openGroup(g){LG=g;$('lg-info').textContent='שליחה מ-'+labelOf(g.system_number)+' ב-'+shortFmt.format(g.created_at)+' על ידי '+(g.created_by||'—')+' · '+plural(g.recipients,'נמען אחד','נמענים');
+ $('lg-current').textContent=g.url;$('lg-original').hidden=!(g.sent_url&&g.sent_url!==g.url);$('lg-original').textContent='בהודעה נשלח במקור: '+(g.sent_url||'');$('lg-url').value=g.url;
+ $('lg-note').textContent=g.recipients===1?'הקישור האישי של הנמען יוביל ליעד החדש מיד.':'הקישורים האישיים של כל '+nf.format(g.recipients)+' הנמענים יובילו ליעד החדש מיד. הטקסט של ההודעות שנשלחו לא משתנה.';$('lg-error').hidden=true;$('lg-dlg').showModal();$('lg-url').focus();}
+$('lg-form').addEventListener('submit',async function(e){e.preventDefault();$('lg-error').hidden=true;try{await post('/api/admin/links/groups/save',{id:LG.id,url:$('lg-url').value.trim()});$('lg-dlg').close();toast('היעד שונה');await loadLinks();}catch(err){linkError('lg-error',err);}});
 // Sender IDs (admins only on the server too): a number verified by a code from Micropay, or a text name approved in
 // Micropay's site. Each one lists the users allowed to send as it.
 const SENDER_STATUS={verified:['אומת בקוד',''],unconfirmed:['טרם נבדק בשליחה',''],confirmed:['אושר בשליחה',''],rejected:['מיקרופיי דחה: השם לא מאושר',' off']};

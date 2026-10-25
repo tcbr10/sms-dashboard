@@ -10,8 +10,8 @@ import {findLinks,optoutCodes,optoutUrl,trackLinks} from './links';
 // prepareSend checks who may send what; executeSend sends it and records the result. Opt-outs, the daily limit and
 // contact data for variables are read at execution, so a scheduled send uses them as they are at its send time.
 export type Sender = {email:string;role:'admin'|'user';can_bulk_send:number;daily_limit:number|null};
-export type SendInput = {system_number?:unknown;body?:unknown;recipients?:unknown;flow_id?:unknown;stop_bot?:unknown;test?:unknown;bulk_preview?:unknown;bulk?:unknown;track_links?:unknown;sender_id?:unknown};
-export type Prepared = {system:string;message:string;recipients:string[];invalid:number;duplicates:number;flow:Flow|null;stopBot:boolean;test:boolean;bulkPreview:boolean;bulk:boolean;personal:boolean;track:boolean;from:From|null;settings:Settings};
+export type SendInput = {system_number?:unknown;body?:unknown;recipients?:unknown;flow_id?:unknown;stop_bot?:unknown;test?:unknown;bulk_preview?:unknown;bulk?:unknown;track_links?:unknown;sender_id?:unknown;batch_of?:unknown};
+export type Prepared = {system:string;message:string;recipients:string[];invalid:number;duplicates:number;flow:Flow|null;stopBot:boolean;test:boolean;bulkPreview:boolean;bulk:boolean;personal:boolean;track:boolean;from:From|null;groupKey:string|null;settings:Settings};
 // A sender ID the message goes out as, instead of the system number (senders table).
 export type From = {id:number;kind:'phone'|'name';value:string;status:string};
 export type Outcome = {status:'accepted'|'rejected'|'unknown';sent:number;counts:{accepted:number;rejected:number;unknown:number};skipped:{invalid:number;duplicates:number;opted_out:number};task_id:string|null;error:string|null;duplicate?:boolean};
@@ -41,6 +41,10 @@ export async function prepareSend(env: Env, sender: Sender, input: SendInput, no
  const personal = hasVariables(message);
  if (personal) { const unknown = unknownVariables(message,settings.contact_fields); if (unknown.length) throw new HttpError(400,'Unknown variable: {'+unknown.join('}, {')+'}'); }
  const track = input.track_links === true;
+ // batch_of names the whole send when it goes out in batches (the browser's first send ID, or the scheduled send's ID),
+ // so its tracked links are listed and edited together.
+ if (input.batch_of !== undefined && input.batch_of !== null && (typeof input.batch_of !== 'string' || !/^[0-9a-f-]{36}$/.test(input.batch_of))) throw new HttpError(400,'Invalid batch_of');
+ const groupKey = typeof input.batch_of === 'string' ? input.batch_of : null;
  // A sender ID must be active and assigned to the sender (admins may use all of them), checked again when a scheduled
  // send goes out. Replies to it don't reach this system, so it can't start a bot flow, and a send to several
  // recipients carries a personal opt-out link instead of "reply to opt out".
@@ -53,7 +57,7 @@ export async function prepareSend(env: Env, sender: Sender, input: SendInput, no
   if ((list.recipients.length > 1 || input.bulk === true || (test && input.bulk_preview === true)) && !(settings.optout_link_text && settings.link_base)) throw new HttpError(400,'Set the opt-out link text and the short link address in Settings before sending to several recipients with a sender ID');
  }
  if (track && !settings.link_base) throw new HttpError(400,'Link tracking is not set up'); if (track && !findLinks(message).length) throw new HttpError(400,'The message has no links to track');
- return {system,message,...list,flow,stopBot:input.stop_bot === true && !flow,test,bulkPreview:input.bulk_preview === true,bulk:list.recipients.length > 1 || input.bulk === true,personal,track,from,settings};
+ return {system,message,...list,flow,stopBot:input.stop_bot === true && !flow,test,bulkPreview:input.bulk_preview === true,bulk:list.recipients.length > 1 || input.bulk === true,personal,track,from,groupKey,settings};
 }
 
 // Sends to the given recipients (all of p.recipients, or one batch of them). The ID is claimed in sends before
@@ -86,15 +90,23 @@ export async function executeSend(env: Env, fetcher: Fetch, token: string, id: s
  const now = Date.now();
  const claimSend = env.DB.prepare("INSERT INTO sends (id,email,system_number,body,recipients,status,created_at,is_test,sender_id) VALUES (?,?,?,?,?,'sending',?,?,?) ON CONFLICT(id) DO NOTHING").bind(id,sender.email,system,withOptout(p.message),to.length,now,test?1:0,p.from?.id ?? null);
  // The send is claimed and its links stored in one transaction, before Micropay is called, so a link works as soon as it arrives.
+ // Each link of the message is a group (one per send and address, link_groups): the redirect reads its address from the
+ // group, so changing where a sent link leads is one row, and the links tab lists groups rather than every recipient.
+ const key = p.groupKey ?? id;
+ const groupRows = (links: {url:string}[]) => { const n = new Map<string,number>(); for (const l of links) n.set(l.url,(n.get(l.url) ?? 0)+1); return [...n].map(([url,count]) => ({url,n:count})); };
  let built = build(); let claim: D1Result;
  for (let attempt = 1;; attempt++) {
-  try { claim = built.links.length ? (await env.DB.batch([claimSend,env.DB.prepare("INSERT INTO links (code,send_id,system_number,peer_number,url,created_at) SELECT json_extract(value,'$.code'),?,?,json_extract(value,'$.number'),json_extract(value,'$.url'),? FROM json_each(?)").bind(id,system,now,JSON.stringify(built.links))]))[0] : await claimSend.run(); break; }
+  try { claim = built.links.length ? (await env.DB.batch([claimSend,
+   env.DB.prepare("INSERT INTO link_groups (send_key,url,system_number,created_by,created_at,recipients,updated_at) SELECT ?1,json_extract(value,'$.url'),?2,?3,?4,json_extract(value,'$.n'),?4 FROM json_each(?5) WHERE true ON CONFLICT(send_key,url) DO UPDATE SET recipients=link_groups.recipients+excluded.recipients,updated_at=excluded.updated_at").bind(key,system,sender.email,now,JSON.stringify(groupRows(built.links))),
+   env.DB.prepare("INSERT INTO links (code,send_id,system_number,peer_number,url,created_at,group_id) SELECT json_extract(value,'$.code'),?1,?2,json_extract(value,'$.number'),json_extract(value,'$.url'),?3,(SELECT g.id FROM link_groups g WHERE g.send_key=?4 AND g.url=json_extract(value,'$.url')) FROM json_each(?5)").bind(id,system,now,key,JSON.stringify(built.links))]))[0] : await claimSend.run(); break; }
   catch (e) { if (attempt >= 3 || !built.links.length || !/UNIQUE/i.test(String(e))) throw e; built = build(); }
  }
  const {texts,groups,links} = built;
  if (!claim.meta.changes) {
   // Another request claimed this ID at the same moment; the links just stored belong to nothing.
-  if (links.length) await env.DB.prepare("DELETE FROM links WHERE code IN (SELECT json_extract(value,'$.code') FROM json_each(?))").bind(JSON.stringify(links)).run();
+  if (links.length) await env.DB.batch([env.DB.prepare("DELETE FROM links WHERE code IN (SELECT json_extract(value,'$.code') FROM json_each(?))").bind(JSON.stringify(links)),
+   ...groupRows(links).map(g => env.DB.prepare('UPDATE link_groups SET recipients=recipients-? WHERE send_key=? AND url=?').bind(g.n,key,g.url)),
+   env.DB.prepare('DELETE FROM link_groups WHERE send_key=? AND recipients<=0').bind(key)]);
   return {status:'unknown',sent:to.length,counts:{accepted:0,rejected:0,unknown:0},skipped:{invalid:p.invalid,duplicates:p.duplicates,opted_out:blocked.size},task_id:null,error:null,duplicate:true};
  }
  const tracked = new Set(links.map(l => l.number));

@@ -21,7 +21,7 @@ export async function runScheduled(env: Env, fetcher: Fetch): Promise<boolean> {
   const sender = await env.DB.prepare('SELECT email,role,can_bulk_send,daily_limit FROM users WHERE email=? AND active=1').bind(row.email).first<Sender>();
   if (!sender) throw new HttpError(403,'The user who scheduled this send is no longer active');
   const all = JSON.parse(row.recipients) as string[];
-  const p = await prepareSend(env,sender,{system_number:row.system_number,body:row.body,recipients:[],flow_id:row.flow_id,stop_bot:!!row.stop_bot,track_links:!!row.track_links,sender_id:row.sender_id,bulk:all.length > 1},{recipients:all,invalid:row.invalid,duplicates:row.duplicates});
+  const p = await prepareSend(env,sender,{system_number:row.system_number,body:row.body,recipients:[],flow_id:row.flow_id,stop_bot:!!row.stop_bot,track_links:!!row.track_links,sender_id:row.sender_id,batch_of:row.id,bulk:all.length > 1},{recipients:all,invalid:row.invalid,duplicates:row.duplicates});
   const size = (p.personal || p.track || (!!p.from && all.length > 1)) && !p.settings.micropay_listjson ? CRON_PERSONAL_BATCH : all.length; const batch = all.slice(row.progress,row.progress+size);
   try {
    const o = await executeSend(env,fetcher,token,row.id+':'+row.progress,sender,p,batch,'sms-dashboard scheduled '+sender.email);
