@@ -1,0 +1,5 @@
+CREATE TABLE flows_new (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, system_number TEXT NOT NULL REFERENCES system_numbers(number), trigger TEXT NOT NULL CHECK (trigger IN ('any','keyword','send','external')), keyword TEXT, steps TEXT NOT NULL CHECK (json_valid(steps)), fallback TEXT NOT NULL DEFAULT '', expire_hours INTEGER NOT NULL DEFAULT 24, active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0,1)), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, repeat_mode TEXT NOT NULL DEFAULT 'once' CHECK (repeat_mode IN ('once','always')));
+INSERT INTO flows_new (id,name,system_number,trigger,keyword,steps,fallback,expire_hours,active,created_at,updated_at) SELECT id,name,system_number,trigger,keyword,steps,fallback,expire_hours,active,created_at,updated_at FROM flows;
+DROP TABLE flows;
+ALTER TABLE flows_new RENAME TO flows;
+CREATE TABLE flow_customers (flow_id INTEGER NOT NULL, peer_number TEXT NOT NULL, started_at INTEGER NOT NULL, PRIMARY KEY (flow_id, peer_number)) WITHOUT ROWID;

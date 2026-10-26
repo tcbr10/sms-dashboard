@@ -17,7 +17,7 @@ let mf:Miniflare;let env:Env;
 const number='+972501234567',other='+972501234568',peer='+972509876543',token='a'.repeat(40),outToken='b'.repeat(40),message='שלום 👋\n& + "בדיקה" %20';
 beforeAll(async()=>{mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("test")}}',compatibilityDate:'2026-08-06',d1Databases:{DB:'sms-test'}});const bindings=await mf.getBindings();env={DB:bindings.DB as D1Database,INCOMING_TOKEN:token,OUTGOING_TOKEN:outToken};const dir=new URL('../migrations/',import.meta.url);for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort())for(const sql of (await readFile(new URL(file,dir),'utf8')).split(';').filter(s=>s.trim()))await env.DB.prepare(sql).run();});
 afterAll(async()=>{await mf?.dispose();});
-beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','imports','forward_rules','deliveries','flows','conversations','bot_answers','bot_blocks','scheduled_sends','links','bot_threads','sender_users','senders','optout_codes','link_groups','short_links','short_link_days','system_numbers'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers (number,label,active) VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
+beforeEach(async()=>{await env.DB.batch([...['messages','user_numbers','sends','opt_outs','audit_log','settings','list_members','lists','contacts','users','imports','forward_rules','deliveries','flows','conversations','bot_answers','bot_blocks','scheduled_sends','links','bot_threads','sender_users','senders','optout_codes','link_groups','short_links','short_link_days','flow_customers','system_numbers'].map(t=>env.DB.prepare('DELETE FROM '+t)),env.DB.prepare('INSERT INTO system_numbers (number,label,active) VALUES (?, ?, 1), (?, ?, 1)').bind(number,'Office',other,'Sales'),env.DB.prepare("INSERT INTO users (email,role,created_at) VALUES ('alice@example.com','user',1),('bob@example.com','user',1),('shared@example.com','user',1),('admin@example.com','admin',1)"),env.DB.prepare('INSERT INTO user_numbers (email,system_number) VALUES (?, ?), (?, ?), (?, ?), (?, ?)').bind('alice@example.com',number,'alice@example.com',other,'bob@example.com',other,'shared@example.com',number)]);});
 const user=(email:string,role:'admin'|'user'='user'):User=>({email,name:'',role,can_bulk_send:0,daily_limit:null,density:null,columns:null,test_number:null,sessions_revoked_at:null,can_edit_contacts:1});
 const ctx={waitUntil(){},passThroughOnException(){}} as unknown as ExecutionContext;
 function send(body:Record<string,unknown>,out=false,secret=out?outToken:token){return ingestion.fetch(new Request('https://ingest.test'+(out?'/events/outgoing':'/hooks/incoming'),{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+secret},body:JSON.stringify({event_id:'event-1',system_number:number,peer_number:peer,body:message,...body})}),env);}
@@ -705,4 +705,37 @@ describe('links tab',()=>{
   expect((await req('admin@example.com','/api/admin/links/delete',{code:'sale'})).status).toBe(200);expect((await open('sale')).status).toBe(404);expect(await env.DB.prepare("SELECT 1 FROM short_link_days WHERE code='sale'").first()).toBeNull();
   expect((await general()).base).toBe(base);expect((await open('nothere')).status).toBe(404);
   expect((await env.DB.prepare("SELECT action,target FROM audit_log WHERE action LIKE 'link.%' ORDER BY id").all()).results.map(r=>(r as {action:string}).action)).toEqual(['link.create','link.create','link.update','link.update','link.delete']);});
+});
+describe('first question sent from another system',()=>{
+ const steps=[{id:'s1',type:'options',text:'מה מעניין אותך? 1 דירה 2 משרד 3 אחר',options:[{reply:'1',meaning:'דירה',next:'s2'},{reply:'2',meaning:'משרד',next:'s2'},{reply:'3',meaning:'אחר',next:'s2'}]},
+  {id:'s2',type:'text',text:'מה השם?',field:'name',next:'s3'},{id:'s3',type:'end',text:'תודה!'}];
+ const flow=(b:Record<string,unknown>={})=>api('admin@example.com','/api/admin/flows/save',{name:'ליד',system_number:number,trigger:'external',steps,fallback:'',expire_hours:24,active:true,...b});
+ let n=0;const say=async(text:string,from='0509876543')=>{const r=await ingest(callback('json',{origsms:text,msgid:'e'+(++n),phone:from}),env);expect(r.status).toBe(200);return (JSON.parse(await r.text()) as {reply:string}).reply;};
+ const note=async(text:string)=>{const r=await env.DB.prepare("SELECT bot FROM messages WHERE direction='in' AND body=? ORDER BY id DESC").bind(text).first<{bot:string|null}>();return r?.bot?JSON.parse(r.bot):null;};
+ it('reads a customer\'s first message as the answer to the first question, and goes on from there',async()=>{const id=(await body(flow())).id as number;
+  expect(await say('1')).toBe('מה השם?');expect(await note('1')).toEqual({flow:id,step:'s1',match:'option',external:true});
+  expect(await say('דנה')).toBe('תודה!');
+  expect((await env.DB.prepare('SELECT step,answer,meaning FROM bot_answers ORDER BY id').all()).results).toEqual([{step:'s1',answer:'1',meaning:'דירה'},{step:'s2',answer:'דנה',meaning:null}]);
+  expect(await env.DB.prepare('SELECT flow_id FROM bot_threads WHERE peer_number=?').bind(peer).first()).toEqual({flow_id:id});
+  // Once (the default): a customer who went through it is not read as answering again.
+  expect(await say('2')).toBe('');expect(await note('2')).toBeNull();expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM bot_answers').first<{n:number}>())!.n).toBe(2);
+  expect((await flow({id,repeat_mode:'always'})).status).toBe(200);expect(await say('3')).toBe('מה השם?');});
+ it('asks the first question itself when the answer is not recognized, then gives up as usual',async()=>{const id=(await body(flow())).id as number;
+  expect(await say('שלום, קיבלתי הודעה')).toBe('לא זיהינו את התשובה.\nמה מעניין אותך? 1 דירה 2 משרד 3 אחר');
+  expect(await note('שלום, קיבלתי הודעה')).toEqual({flow:id,step:'s1',match:'none',retry:1,external:true});expect(await env.DB.prepare('SELECT step,retries FROM conversations').first()).toEqual({step:'s1',retries:1});
+  expect(await say('7')).toBe('לא זיהינו את התשובה.\nמה מעניין אותך? 1 דירה 2 משרד 3 אחר');expect(await say('לא יודע')).toBe('');
+  expect(await note('לא יודע')).toEqual({flow:id,step:'s1',match:'none',gave_up:true});expect(await env.DB.prepare('SELECT 1 FROM conversations').first()).toBeNull();
+  expect(await say('1')).toBe('');
+  expect(await say('2','0521234567')).toBe('מה השם?');});
+ it('lets a keyword flow go first and leaves opted-out and blocked customers alone',async()=>{await flow();
+  await api('admin@example.com','/api/admin/flows/save',{name:'מבצע',system_number:number,trigger:'keyword',keyword:'מבצע',steps:[{id:'s1',type:'end',text:'פרטי המבצע'}],fallback:'',expire_hours:24,active:true});
+  expect(await say('מבצע')).toBe('פרטי המבצע');expect(await say('1')).toBe('מה השם?');
+  await env.DB.prepare("INSERT INTO opt_outs (number,source,created_at) VALUES ('+972521234567','manual',1)").run();expect(await say('1','0521234567')).toBe('');
+  await env.DB.prepare("INSERT INTO bot_blocks (system_number,peer_number,created_at,created_by) VALUES (?,'+972546667788',1,'x')").bind(number).run();expect(await say('1','0546667788')).toBe('');
+  expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM flow_customers").first()).toEqual({n:1});});
+ it('validates: one flow per number answers every message, and the first step must ask something',async()=>{expect((await flow()).status).toBe(200);
+  expect((await api('admin@example.com','/api/admin/flows/save',{name:'כל הודעה',system_number:number,trigger:'any',steps,fallback:'',expire_hours:24,active:true})).status).toBe(409);
+  expect((await flow({name:'עוד אחד'})).status).toBe(409);expect((await flow({name:'כבוי',active:false})).status).toBe(200);
+  expect((await flow({name:'סוף',active:false,steps:[{id:'s1',type:'end',text:'תודה'}]})).status).toBe(400);expect((await flow({name:'x',active:false,repeat_mode:'sometimes'})).status).toBe(400);
+  const f=((await body(api('admin@example.com','/api/admin/flows'))).flows as {name:string;trigger:string;repeat_mode:string}[]).find(x=>x.name==='ליד')!;expect(f).toMatchObject({trigger:'external',repeat_mode:'once'});});
 });

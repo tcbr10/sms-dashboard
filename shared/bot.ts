@@ -6,7 +6,10 @@ import {hasVariables,render} from './template';
 // incoming-SMS webhook, so they need no API call and come from the same number.
 export type Option = {reply:string;meaning:string;next:string};
 export type Step = {id:string;text:string;type:'options'|'text'|'end';options?:Option[];next?:string;field?:string};
-export type Flow = {id:number;name:string;system_number:string;trigger:'any'|'keyword'|'send';keyword:string|null;steps:Step[];fallback:string;expire_hours:number;active:number};
+// trigger 'external': the first question was sent by another system, so a customer's message (when they are in no
+// conversation) is read as the answer to the first step. repeat_mode says whether someone who already went through
+// such a flow is read that way again ('always') or not ('once').
+export type Flow = {id:number;name:string;system_number:string;trigger:'any'|'keyword'|'send'|'external';keyword:string|null;steps:Step[];fallback:string;expire_hours:number;active:number;repeat_mode:'once'|'always'};
 type Conversation = {flow_id:number;step:string;retries:number;expires_at:number};
 export const DEFAULT_FALLBACK = 'לא זיהינו את התשובה.';
 const MAX_RETRIES = 2; // an unrecognized reply repeats the question twice, then the conversation ends
@@ -43,7 +46,7 @@ export function touchThreads(env: Env, system: string, peers: string[], at: numb
 // What the bot did with a message, kept on the message (messages.bot) for the chats page. On a customer's message:
 // {flow,step,match:'option'|'text'|'none',retry?,gave_up?} for an answer to the question of that step, or {start}
 // when it started a flow. On the bot's own message: {flow,step} for the question it asks, with retry, start or end.
-export type BotNote = {flow?:number;step?:string;match?:'option'|'text'|'none';retry?:number;gave_up?:boolean;start?:number|boolean;end?:boolean};
+export type BotNote = {flow?:number;step?:string;match?:'option'|'text'|'none';retry?:number;gave_up?:boolean;start?:number|boolean;end?:boolean;external?:boolean};
 
 // Saves an answer to a contact field, merging with the contact's other fields.
 function saveField(env: Env, peer: string, field: string, value: string, now: number): D1PreparedStatement {
@@ -68,26 +71,39 @@ export async function handleIncoming(env: Env, m: {id:number;inserted:boolean;sy
  const writes: D1PreparedStatement[] = []; let reply: string|null = null; let heard: BotNote|null = null; let said: BotNote|null = null;
  const flow = conv && conv.expires_at > now ? await loadFlow(env, conv.flow_id) : null;
  const step = flow?.active ? flow.steps.find(s => s.id === conv!.step) : undefined;
- if (flow && step && conv && step.type !== 'end') {
-  const option = step.type === 'options' ? matchOption(step, m.body) : undefined;
+ // Reads the message as the answer to a step: the step the customer is on, or the first step of a flow whose first
+ // question was sent elsewhere (external, with no conversation yet: one is opened at that step if the answer needs
+ // repeating, so the usual repeat count applies).
+ const answer = (flow: Flow, step: Step, retries: number, external: boolean) => {
+  const option = step.type === 'options' ? matchOption(step, m.body) : undefined; const ext = external ? {external:true} : {};
   if (step.type === 'options' && !option) {
-   const retry = conv.retries + 1; heard = {flow:flow.id,step:step.id,match:'none',...(conv.retries < MAX_RETRIES ? {retry} : {gave_up:true})};
-   if (conv.retries < MAX_RETRIES) { reply = (flow.fallback || DEFAULT_FALLBACK) + '\n' + step.text; said = {flow:flow.id,step:step.id,retry}; writes.push(env.DB.prepare('UPDATE conversations SET retries=retries+1,updated_at=?,expires_at=? WHERE system_number=? AND peer_number=?').bind(now, now + flow.expire_hours * 3600000, m.system, m.peer)); }
+   const retry = retries + 1; heard = {flow:flow.id,step:step.id,match:'none',...(retries < MAX_RETRIES ? {retry} : {gave_up:true}),...ext};
+   if (retries < MAX_RETRIES) { reply = (flow.fallback || DEFAULT_FALLBACK) + '\n' + step.text; said = {flow:flow.id,step:step.id,retry};
+    if (external) writes.push(enter(env, flow, step, m.system, m.peer, now));
+    writes.push(env.DB.prepare('UPDATE conversations SET retries=retries+1,updated_at=?,expires_at=? WHERE system_number=? AND peer_number=?').bind(now, now + flow.expire_hours * 3600000, m.system, m.peer)); }
    else writes.push(end);
   } else {
-   const meaning = option ? option.meaning || option.reply : null; heard = {flow:flow.id,step:step.id,match:option ? 'option' : 'text'};
+   const meaning = option ? option.meaning || option.reply : null; heard = {flow:flow.id,step:step.id,match:option ? 'option' : 'text',...ext};
    writes.push(env.DB.prepare('INSERT INTO bot_answers (flow_id,system_number,peer_number,step,question,answer,meaning,message_id,at) VALUES (?,?,?,?,?,?,?,?,?)').bind(flow.id, m.system, m.peer, step.id, step.text, m.body.slice(0, 1000), meaning, m.id, now));
    if (step.field) writes.push(saveField(env, m.peer, step.field, meaning ?? m.body, now));
    const next = flow.steps.find(s => s.id === (option ? option.next : step.next));
    if (next) { reply = next.text; said = {flow:flow.id,step:next.id,...(next.type === 'end' ? {end:true} : {})}; writes.push(enter(env, flow, next, m.system, m.peer, now)); } else writes.push(end);
   }
- } else {
+ };
+ if (flow && step && conv && step.type !== 'end') answer(flow, step, conv.retries, false);
+ else {
   if (conv) writes.push(end);
-  // A keyword flow whose keyword is the whole message or its first word wins over a flow that answers any message.
-  const flows = (await env.DB.prepare("SELECT * FROM flows WHERE system_number=? AND active=1 AND trigger IN ('any','keyword')").bind(m.system).all<Omit<Flow,'steps'> & {steps:string}>()).results.map(parseFlow);
+  // A keyword flow whose keyword is the whole message or its first word wins over a flow that starts on any message or
+  // whose first question was sent elsewhere (only one of those two can be active on a number).
+  const flows = (await env.DB.prepare("SELECT * FROM flows WHERE system_number=? AND active=1 AND trigger IN ('any','keyword','external')").bind(m.system).all<Omit<Flow,'steps'> & {steps:string}>()).results.map(parseFlow);
   const text = normalizeReply(m.body), first = text.split(' ')[0];
-  const start = flows.find(f => f.trigger === 'keyword' && f.keyword && [text, first].includes(normalizeReply(f.keyword))) ?? flows.find(f => f.trigger === 'any');
-  if (start?.steps.length) { reply = start.steps[0].text; heard = {start:start.id}; said = {flow:start.id,step:start.steps[0].id,start:true,...(start.steps[0].type === 'end' ? {end:true} : {})}; writes.push(enter(env, start, start.steps[0], m.system, m.peer, now)); }
+  const keyword = flows.find(f => f.trigger === 'keyword' && f.keyword && [text, first].includes(normalizeReply(f.keyword)));
+  const external = keyword ? undefined : flows.find(f => f.trigger === 'external' && f.steps[0] && f.steps[0].type !== 'end');
+  // 'once': a customer this flow already read (or who answered it before it started this way) is left alone.
+  const fresh = external && (external.repeat_mode === 'always' || !await env.DB.prepare('SELECT 1 FROM flow_customers WHERE flow_id=?1 AND peer_number=?2 UNION ALL SELECT 1 FROM bot_answers WHERE system_number=?3 AND peer_number=?2 AND flow_id=?1 LIMIT 1').bind(external.id, m.peer, m.system).first());
+  if (external && fresh) { answer(external, external.steps[0], 0, true); writes.push(env.DB.prepare('INSERT INTO flow_customers (flow_id,peer_number,started_at) VALUES (?,?,?) ON CONFLICT DO NOTHING').bind(external.id, m.peer, now)); }
+  else { const start = keyword ?? flows.find(f => f.trigger === 'any');
+   if (start?.steps.length) { reply = start.steps[0].text; heard = {start:start.id}; said = {flow:start.id,step:start.steps[0].id,start:true,...(start.steps[0].type === 'end' ? {end:true} : {})}; writes.push(enter(env, start, start.steps[0], m.system, m.peer, now)); } }
  }
  if (heard) writes.push(env.DB.prepare('UPDATE messages SET bot=?,updated_at=MAX(?,updated_at+1) WHERE id=?').bind(JSON.stringify(heard), now, m.id));
  // The thread opens when a flow starts; a conversation that moved or ended also changes the thread's state. It is

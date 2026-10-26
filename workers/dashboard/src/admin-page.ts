@@ -99,8 +99,9 @@ const userDialog = String.raw`
 <dialog id="bf-dlg" aria-labelledby="bf-title"><form class="dialog-body" id="bf-form" novalidate>
  <div class="dialog-head"><h2 id="bf-title"></h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
  <div class="grid2"><label class="fld"><span>שם התהליך</span><input id="bf-name" maxlength="60" placeholder="לדוגמה: סקר התעניינות"></label><label class="fld"><span>מספר</span><select id="bf-number"></select></label></div>
- <div class="fld"><span class="label">מתי התהליך מתחיל</span><div class="seg" role="group" aria-label="התחלה"><button type="button" data-trigger="any" aria-pressed="true">כל הודעה נכנסת</button><button type="button" data-trigger="keyword" aria-pressed="false">מילת מפתח</button><button type="button" data-trigger="send" aria-pressed="false">רק משליחה מהלוח</button></div>
-  <input id="bf-keyword" class="field" maxlength="30" placeholder="מילת המפתח (ההודעה כולה או המילה הראשונה בה)" hidden><p class="hint" id="bf-trigger-hint"></p></div>
+ <div class="fld"><span class="label">מתי התהליך מתחיל</span><div class="seg" role="group" aria-label="התחלה"><button type="button" data-trigger="any" aria-pressed="true">כל הודעה נכנסת</button><button type="button" data-trigger="keyword" aria-pressed="false">מילת מפתח</button><button type="button" data-trigger="send" aria-pressed="false">רק משליחה מהלוח</button><button type="button" data-trigger="external" aria-pressed="false">שאלה ראשונה ממערכת אחרת</button></div>
+  <input id="bf-keyword" class="field" maxlength="30" placeholder="מילת המפתח (ההודעה כולה או המילה הראשונה בה)" hidden><p class="hint" id="bf-trigger-hint"></p>
+  <label class="fld" id="bf-repeat-row" hidden><span>לקוח שכבר עבר את התהליך</span><select id="bf-repeat"><option value="once">לא נכנס אליו שוב (ברירת מחדל)</option><option value="always">כל הודעה חדשה שלו נקראת שוב כתשובה לשאלה הראשונה</option></select></label></div>
  <div class="grid2"><label class="fld"><span>שיחה נסגרת אחרי שקט של (שעות)</span><input type="number" id="bf-expire" min="1" max="720"></label><label class="fld"><span>הודעה לתשובה לא מזוהה</span><input id="bf-fallback" maxlength="300" placeholder="לא זיהינו את התשובה."></label></div>
  <div class="fld"><span class="label">שלבים</span><div class="steps" id="bf-steps"></div><div class="row"><button type="button" class="ghost" id="bf-add-step">`+svg('plus')+String.raw`הוספת שלב</button><span class="hint">השלב הראשון נשלח כשהתהליך מתחיל. תשובה לא מזוהה חוזרת על השאלה פעמיים ואז השיחה נסגרת. לקוח שמשיב במילת הסרה יוצא מהתהליך.</span></div></div>
  <label class="check"><input type="checkbox" id="bf-active">התהליך פעיל</label>
@@ -607,7 +608,7 @@ async function undoImport(m){if(!await confirmAction('ביטול ייבוא','ל
 
 // Bot flows. The editor keeps the flow in BF and redraws the step cards from it; inputs write straight back into BF.
 let FLOWS=[],BF=null,BA=null;
-const TRIGGERS={any:'כל הודעה נכנסת',keyword:'מילת מפתח',send:'רק משליחה מהלוח'};
+const TRIGGERS={any:'כל הודעה נכנסת',keyword:'מילת מפתח',send:'רק משליחה מהלוח',external:'שאלה ראשונה ממערכת אחרת'};
 async function loadFlows(){const r=await Promise.all([get('/api/admin/flows'),get('/api/admin/numbers'),get('/api/admin/settings')]);FLOWS=r[0].flows;NUMBERS=r[1].numbers;SETTINGS=r[2];renderFlows();}
 function renderFlows(){const body=$('b-rows');body.replaceChildren();
  for(const f of FLOWS){const tr=el('tr','click');tr.tabIndex=0;tr.dataset.id=String(f.id);const st=el('td');st.append(el('span','tag'+(f.active?' accent':' off'),f.active?'פעיל':'כבוי'));
@@ -638,12 +639,12 @@ function renderSteps(){const box=$('bf-steps');box.replaceChildren();
    const row=el('div','row');row.append(add,fieldSelect(s.field,'שמירת המשמעות בשדה',function(v){s.field=v;}));card.append(row);}
   else if(s.type==='text'){const row=el('div','row');const l=el('label','row hint');l.append('השלב הבא',nextSelect(s,s.next,function(v){s.next=v;}));row.append(l,fieldSelect(s.field,'שמירת התשובה בשדה',function(v){s.field=v;}));card.append(row);}
   box.append(card);});}
-function bfTrigger(t){BF.trigger=t;for(const b of document.querySelectorAll('[data-trigger]'))b.setAttribute('aria-pressed',String(b.dataset.trigger===t));$('bf-keyword').hidden=t!=='keyword';
- $('bf-trigger-hint').textContent=t==='any'?'כל הודעה של לקוח שאינו באמצע שיחה מתחילה את התהליך. רק תהליך פעיל אחד במספר יכול לעבוד כך.':t==='keyword'?'הודעה שהיא מילת המפתח, או שמתחילה בה, מתחילה את התהליך.':'התהליך מתחיל רק כשבוחרים אותו בחלון שליחת הודעה. השלב הראשון נשלח לנמענים, ותשובותיהם ממשיכות את התהליך.';}
+function bfTrigger(t){BF.trigger=t;for(const b of document.querySelectorAll('[data-trigger]'))b.setAttribute('aria-pressed',String(b.dataset.trigger===t));$('bf-keyword').hidden=t!=='keyword';$('bf-repeat-row').hidden=t!=='external';
+ $('bf-trigger-hint').textContent=t==='any'?'כל הודעה של לקוח שאינו באמצע שיחה מתחילה את התהליך. רק תהליך פעיל אחד במספר יכול לעבוד כך.':t==='keyword'?'הודעה שהיא מילת המפתח, או שמתחילה בה, מתחילה את התהליך.':t==='external'?'השאלה הראשונה נשלחת ממערכת אחרת, ולכן הבוט לא שולח אותה. הודעה של לקוח שאינו באמצע שיחה נקראת כתשובה לשלב הראשון (למשל 1, 2, 3). תשובה לא מזוהה מקבלת את השאלה הראשונה מהבוט, לכן כדאי להעתיק לשלב הראשון את נוסח השאלה שנשלחה. מילת מפתח של תהליך אחר קודמת לזה, ורק תהליך פעיל אחד במספר יכול לעבוד כך או על כל הודעה.':'התהליך מתחיל רק כשבוחרים אותו בחלון שליחת הודעה. השלב הראשון נשלח לנמענים, ותשובותיהם ממשיכות את התהליך.';}
 function openFlow(id){const f=id?FLOWS.find(function(x){return x.id===id;}):null;BF=f?JSON.parse(JSON.stringify({id:f.id,trigger:f.trigger,steps:f.steps})):{id:null,trigger:'any',steps:[{id:'s1',type:'options',text:'',options:[{reply:'1',meaning:'',next:''},{reply:'2',meaning:'',next:''}]}]};
  for(const s of BF.steps){if(s.type==='options'&&!s.options)s.options=[];}
  $('bf-title').textContent=f?'עריכת תהליך':'תהליך חדש';$('bf-name').value=f?f.name:'';const sel=$('bf-number');sel.replaceChildren();for(const n of NUMBERS){const o=el('option','',n.label+' · '+local(n.number));o.value=n.number;sel.append(o);}if(f)sel.value=f.system_number;
- $('bf-keyword').value=f&&f.keyword||'';$('bf-expire').value=String(f?f.expire_hours:24);$('bf-fallback').value=f?f.fallback:'';$('bf-active').checked=f?!!f.active:false;$('bf-delete').hidden=!f;$('bf-error').hidden=true;
+ $('bf-keyword').value=f&&f.keyword||'';$('bf-repeat').value=f&&f.repeat_mode||'once';$('bf-expire').value=String(f?f.expire_hours:24);$('bf-fallback').value=f?f.fallback:'';$('bf-active').checked=f?!!f.active:false;$('bf-delete').hidden=!f;$('bf-error').hidden=true;
  bfTrigger(BF.trigger);renderSteps();$('bf-dlg').showModal();$('bf-name').focus();}
 for(const b of document.querySelectorAll('[data-trigger]'))b.addEventListener('click',function(){bfTrigger(b.dataset.trigger);});
 $('bf-add-step').addEventListener('click',function(){if(BF.steps.length>=30)return;BF.steps.push({id:newStepId(),type:'options',text:'',options:[{reply:'1',meaning:'',next:''},{reply:'2',meaning:'',next:''}]});renderSteps();});
@@ -652,7 +653,7 @@ $('b-rows').addEventListener('click',function(e){const a=e.target.closest('[data
 $('b-rows').addEventListener('keydown',function(e){if((e.key==='Enter'||e.key===' ')&&e.target.dataset.id){e.preventDefault();openFlow(Number(e.target.dataset.id));}});
 $('bf-form').addEventListener('submit',async function(e){e.preventDefault();$('bf-error').hidden=true;$('bf-save').disabled=true;
  const steps=BF.steps.map(function(s){return s.type==='end'?{id:s.id,type:'end',text:s.text}:s.type==='text'?{id:s.id,type:'text',text:s.text,next:s.next||'',field:s.field||''}:{id:s.id,type:'options',text:s.text,options:s.options,field:s.field||''};});
- try{const d=await post('/api/admin/flows/save',{id:BF.id,name:$('bf-name').value,system_number:$('bf-number').value,trigger:BF.trigger,keyword:$('bf-keyword').value,steps:steps,fallback:$('bf-fallback').value,expire_hours:Number($('bf-expire').value),active:$('bf-active').checked});
+ try{const d=await post('/api/admin/flows/save',{id:BF.id,name:$('bf-name').value,system_number:$('bf-number').value,trigger:BF.trigger,keyword:$('bf-keyword').value,repeat_mode:$('bf-repeat').value,steps:steps,fallback:$('bf-fallback').value,expire_hours:Number($('bf-expire').value),active:$('bf-active').checked});
   $('bf-dlg').close();toast(BF.id?'התהליך עודכן':'התהליך נוסף');void d;await loadFlows();}catch(err){dlgError('bf-error',err);}finally{$('bf-save').disabled=false;}});
 $('bf-delete').addEventListener('click',async function(){const id=BF.id;$('bf-dlg').close();if(!await confirmAction('מחיקת תהליך','למחוק את התהליך, את השיחות הפעילות בו ואת התשובות שנאספו? ההודעות עצמן לא יימחקו.','מחיקה'))return;
  try{await post('/api/admin/flows/delete',{id:id});toast('התהליך נמחק');await loadFlows();}catch(err){error(err);}});

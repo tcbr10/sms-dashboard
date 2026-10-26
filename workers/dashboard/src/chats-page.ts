@@ -171,6 +171,7 @@ async function loadOlder(){if(!C.older)return;const s=C.sel;const p=msgQuery();p
 function answerFor(id){return C.meta?C.meta.answers.find(function(a){return a.message_id===id;}):null;}
 function stepOf(note){const f=note&&note.flow&&flowById(note.flow);return f?{flow:f,step:f.steps.find(function(s){return s.id===note.step;})}:null;}
 function heardNotes(m){const n=m.bot;const out=[];if(!n)return out;
+ if(n.external)out.push(['accent','תשובה לשאלה שנשלחה ממערכת אחרת']);
  if(n.start){const f=flowById(n.start);out.push(['accent','התחיל תהליך'+(f?' '+f.name:'')]);}
  else if(n.match==='option'){const a=answerFor(m.id);out.push(['good','זוהה: '+(a?(a.meaning||a.answer):m.body)]);}
  else if(n.match==='text'){out.push(['good','נשמרה כתשובה']);}
