@@ -104,7 +104,7 @@ const userDialog = String.raw`
  <div class="fld"><span class="label">מתי התהליך מתחיל</span><div class="seg" role="group" aria-label="התחלה"><button type="button" data-trigger="any" aria-pressed="true">כל הודעה נכנסת</button><button type="button" data-trigger="keyword" aria-pressed="false">מילת מפתח</button><button type="button" data-trigger="send" aria-pressed="false">רק משליחה מהלוח</button><button type="button" data-trigger="external" aria-pressed="false">שאלה ראשונה ממערכת אחרת</button></div>
   <input id="bf-keyword" class="field" maxlength="30" placeholder="מילת המפתח (ההודעה כולה או המילה הראשונה בה)" hidden><p class="hint" id="bf-trigger-hint"></p>
   <label class="fld" id="bf-repeat-row" hidden><span>לקוח שכבר עבר את התהליך</span><select id="bf-repeat"><option value="once">לא נכנס אליו שוב (ברירת מחדל)</option><option value="always">כל הודעה חדשה שלו נקראת שוב כתשובה לשאלה הראשונה</option></select></label></div>
- <div class="fld" id="bf-aud-row"><label class="fld"><span>למי התהליך מיועד</span><select id="bf-audience"></select></label><p class="hint">עם רשימה, רק לקוחות ברשימה מתחילים את התהליך או מקבלים ממנו תשובות. לקוח שכבר באמצע שיחה ממשיך אותה, ותהליך עם רשימה קודם לתהליך לכל הלקוחות במספר.</p></div>
+ <div class="fld" id="bf-aud-row"><label class="fld"><span>למי התהליך מיועד</span><select id="bf-audience"></select></label><div class="row"><button type="button" class="ghost" id="bf-aud-add">`+svg('plus')+String.raw`הוספת מספרים (הדבקה או קובץ)</button></div><p class="hint">עם רשימה, רק לקוחות ברשימה מתחילים את התהליך או מקבלים ממנו תשובות. לקוח שכבר באמצע שיחה ממשיך אותה, ותהליך עם רשימה קודם לתהליך לכל הלקוחות במספר.</p></div>
  <div class="grid2"><label class="fld"><span>שיחה נסגרת אחרי שקט של (שעות)</span><input type="number" id="bf-expire" min="1" max="720"></label><label class="fld"><span>הודעה לתשובה לא מזוהה</span><input id="bf-fallback" maxlength="300" placeholder="לא זיהינו את התשובה."></label></div>
  <div class="fld"><div class="row"><span class="label">שלבים</span><div class="seg fc-view-toggle end" role="group" aria-label="תצוגה"><button type="button" data-view="canvas" aria-pressed="true">קנבס</button><button type="button" data-view="list" aria-pressed="false">רשימה</button></div></div>
   <div id="bf-canvas"><div class="fc-bar"><button type="button" class="fc-add fc-b" data-fc-add="options">`+svg('plus')+String.raw`שאלה עם תשובות</button><button type="button" class="fc-add fc-p" data-fc-add="text">`+svg('plus')+String.raw`תשובה חופשית</button><button type="button" class="fc-add fc-k" data-fc-add="end">`+svg('plus')+String.raw`סיום</button><button type="button" class="ghost end" id="fc-layout">סידור אוטומטי</button></div>
@@ -114,7 +114,7 @@ const userDialog = String.raw`
   <div class="steps" id="bf-steps" hidden></div><div class="row" id="bf-list-add" hidden><button type="button" class="ghost" id="bf-add-step">`+svg('plus')+String.raw`הוספת שלב</button><span class="hint">השלב הראשון נשלח כשהתהליך מתחיל. תשובה לא מזוהה חוזרת על השאלה פעמיים ואז השיחה נסגרת. לקוח שמשיב במילת הסרה יוצא מהתהליך.</span></div></div>
  <label class="check"><input type="checkbox" id="bf-active">התהליך פעיל</label>
  <div class="banner" id="bf-error" role="alert" hidden></div>
- <div class="dialog-foot"><button type="button" class="ghost danger" id="bf-delete">מחיקת התהליך</button><button type="button" class="ghost" id="bf-send" hidden>שליחת ההודעה הראשונה לרשימה</button><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="bf-save">שמירה</button></div>
+ <div class="dialog-foot"><button type="button" class="ghost danger" id="bf-delete">מחיקת התהליך</button><button type="button" class="ghost" id="bf-record" hidden>רישום הודעה שנשלחה ממערכת אחרת</button><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="bf-save">שמירה</button></div>
 </form></dialog>
 <dialog id="ba-dlg" aria-labelledby="ba-title"><div class="dialog-body">
  <div class="dialog-head"><h2 id="ba-title"></h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
@@ -145,6 +145,29 @@ const userDialog = String.raw`
  <div class="bar" id="mi-bar" hidden><div id="mi-progress"></div></div>
  <div class="banner" id="mi-error" role="alert" hidden></div>
  <div class="dialog-foot"><span class="hint" id="mi-status"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="mi-go">ייבוא</button></div>
+</form></dialog>
+<dialog id="bn-dlg" aria-labelledby="bn-title"><form class="dialog-body" id="bn-form" novalidate>
+ <div class="dialog-head"><h2 id="bn-title">הוספת מספרים לקהל התהליך</h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <p class="hint" id="bn-target"></p>
+ <label class="fld"><span>מספרי טלפון (מופרדים בפסיק או בשורה חדשה)</span><textarea id="bn-text" dir="ltr" rows="5" placeholder="0501234567"></textarea></label>
+ <div class="row"><label class="ghost" id="bn-file-btn">`+svg('file')+String.raw`ייבוא מקובץ (CSV, TXT, Excel)<input type="file" id="bn-file" accept=".csv,.txt,.xlsx" hidden></label><span class="hint" id="bn-file-info"></span></div>
+ <p class="hint" id="bn-sum"></p>
+ <div class="banner" id="bn-error" role="alert" hidden></div>
+ <div class="dialog-foot"><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="bn-go">הוספה</button></div>
+</form></dialog>
+<dialog id="br-dlg" aria-labelledby="br-title"><form class="dialog-body" id="br-form" novalidate>
+ <div class="dialog-head"><h2 id="br-title">רישום הודעה שנשלחה ממערכת אחרת</h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
+ <p class="hint" id="br-flow"></p>
+ <p class="hint">ההודעה לא נשלחת שוב. היא נרשמת כאן כהודעה יוצאת שנשלחה, ומופיעה בתחילת השיחה של כל מספר. תשובות הלקוחות ימשיכו את התהליך, והם יופיעו בעמוד שיחות בוט. מספרים שביקשו הסרה, או שהבוט כבוי להם, מדולגים.</p>
+ <label class="fld"><span>נוסח ההודעה שנשלחה</span><textarea id="br-body" rows="4" maxlength="1000"></textarea></label>
+ <div class="grid2"><label class="fld"><span>תאריך השליחה</span><input type="date" id="br-date"></label><label class="fld"><span>שעה (שעון ישראל)</span><input type="time" id="br-time"></label></div>
+ <label class="fld"><span>נמענים מרשימה</span><select id="br-list"></select></label>
+ <label class="fld"><span>ומספרים נוספים (הדבקה)</span><textarea id="br-text" dir="ltr" rows="3" placeholder="0501234567"></textarea></label>
+ <div class="row"><label class="ghost">`+svg('file')+String.raw`ייבוא מקובץ<input type="file" id="br-file" accept=".csv,.txt,.xlsx" hidden></label><span class="hint" id="br-file-info"></span></div>
+ <p class="hint" id="br-sum"></p>
+ <div class="bar" id="br-bar" hidden><div id="br-progress"></div></div>
+ <div class="banner" id="br-error" role="alert" hidden></div>
+ <div class="dialog-foot"><span class="hint" id="br-status"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="br-go">רישום ההודעה</button></div>
 </form></dialog>
 <dialog id="ci-dlg" aria-labelledby="ci-title"><form class="dialog-body" id="ci-form" novalidate>
  <div class="dialog-head"><h2 id="ci-title">ייבוא אנשי קשר</h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
@@ -288,7 +311,7 @@ const body = header('admin',false) + String.raw`
 `+userDialog+senderDialogs+linkDialogs;
 const script = String.raw`
 const TABS=['users','numbers','senders','links','contacts','optouts','imports','bot','forwards','settings','audit'];
-const ACTIONS={'link.create':'קישור נוצר','link.update':'קישור עודכן','link.delete':'קישור נמחק','link.group':'יעד של קישור שנשלח שונה','sender.add':'שולח נוסף','sender.update':'שולח עודכן','sender.delete':'שולח הוסר','sender.code':'נשלח קוד אימות לשולח','user.create':'משתמש נוסף','user.update':'משתמש עודכן','user.delete':'משתמש נמחק','number.create':'מספר נוסף','number.update':'מספר עודכן','settings.update':'ההגדרות עודכנו','optout.add':'נוספו לרשימת ההסרה','optout.remove':'הוסר מרשימת ההסרה','send':'שליחת הודעה','export':'ייצוא הודעות','user.disconnect':'ניתוק משתמש','user.logout':'התנתקות','access.sync':'סנכרון Cloudflare Access','messages.import':'ייבוא הודעות','send.schedule':'שליחה תוזמנה','send.cancel':'שליחה מתוזמנת בוטלה','send.reschedule':'מועד שליחה שונה','flow.save':'תהליך בוט נשמר','flow.delete':'תהליך בוט נמחק','bot.block':'הבוט הושבת ללקוח','bot.unblock':'הבוט הופעל מחדש ללקוח','forward.save':'כלל העברה נשמר','forward.delete':'כלל העברה נמחק','forward.test':'בדיקת Webhook','forward.secret':'מפתח חתימה הוחלף','forward.resend':'שליחה מחדש ל-Webhook','messages.import.undo':'ביטול ייבוא הודעות','contact.save':'איש קשר נשמר','contact.delete':'איש קשר נמחק','contacts.import':'ייבוא אנשי קשר','list.save':'רשימת תפוצה נשמרה','list.delete':'רשימת תפוצה נמחקה'};
+const ACTIONS={'link.create':'קישור נוצר','link.update':'קישור עודכן','link.delete':'קישור נמחק','link.group':'יעד של קישור שנשלח שונה','sender.add':'שולח נוסף','sender.update':'שולח עודכן','sender.delete':'שולח הוסר','sender.code':'נשלח קוד אימות לשולח','user.create':'משתמש נוסף','user.update':'משתמש עודכן','user.delete':'משתמש נמחק','number.create':'מספר נוסף','number.update':'מספר עודכן','settings.update':'ההגדרות עודכנו','optout.add':'נוספו לרשימת ההסרה','optout.remove':'הוסר מרשימת ההסרה','send':'שליחת הודעה','export':'ייצוא הודעות','user.disconnect':'ניתוק משתמש','user.logout':'התנתקות','access.sync':'סנכרון Cloudflare Access','messages.import':'ייבוא הודעות','send.schedule':'שליחה תוזמנה','send.cancel':'שליחה מתוזמנת בוטלה','send.reschedule':'מועד שליחה שונה','flow.save':'תהליך בוט נשמר','flow.record':'נרשמה הודעה שנשלחה ממערכת אחרת','flow.delete':'תהליך בוט נמחק','bot.block':'הבוט הושבת ללקוח','bot.unblock':'הבוט הופעל מחדש ללקוח','forward.save':'כלל העברה נשמר','forward.delete':'כלל העברה נמחק','forward.test':'בדיקת Webhook','forward.secret':'מפתח חתימה הוחלף','forward.resend':'שליחה מחדש ל-Webhook','messages.import.undo':'ביטול ייבוא הודעות','contact.save':'איש קשר נשמר','contact.delete':'איש קשר נמחק','contacts.import':'ייבוא אנשי קשר','list.save':'רשימת תפוצה נשמרה','list.delete':'רשימת תפוצה נמחקה'};
 const SEND_STATUS={accepted:'התקבלה',rejected:'נדחתה',unknown:'לא ידוע',sending:'בשליחה'};
 let USERS=[],NUMBERS=[],SENDERS=[],SETTINGS=null,OPTOUTS=[],CONTACTS=[],auditBefore=null,importRows=null,importMode='update';
 function error(e){$('error').hidden=false;$('error-text').textContent=message(e);}
@@ -618,10 +641,16 @@ async function undoImport(m){if(!await confirmAction('ביטול ייבוא','ל
 let FLOWS=[],BF=null,BA=null,AUD=[];
 const TRIGGERS={any:'כל הודעה נכנסת',keyword:'מילת מפתח',send:'רק משליחה מהלוח',external:'שאלה ראשונה ממערכת אחרת'};
 async function loadFlows(){const r=await Promise.all([get('/api/admin/flows'),get('/api/admin/numbers'),get('/api/admin/settings'),get('/api/lists')]);FLOWS=r[0].flows;NUMBERS=r[1].numbers;SETTINGS=r[2];AUD=r[3].lists;renderFlows();}
+function fillAudience(value){const aud=$('bf-audience');aud.replaceChildren();const all=el('option','','כל הלקוחות');all.value='';aud.append(all);for(const l of AUD){const o=el('option','','רשימה: '+l.name+' ('+nf.format(l.size)+')'+(l.shared?' · משותפת':''));o.value=String(l.id);aud.append(o);}
+ if(value!==null&&!AUD.some(function(l){return l.id===value;})){const o=el('option','','רשימה #'+value);o.value=String(value);aud.append(o);}aud.value=value!==null?String(value):'';}
+// Numbers typed or pasted, or read from a file's phone column: normalized and without repeats, with a count of values that are not phone numbers.
+function parseNumbers(values){const ok=new Set();let bad=0;for(const v of values)for(const p of phonesIn(v)){if(p.number)ok.add(p.number);else bad++;}return {numbers:Array.from(ok),invalid:bad};}
+function typedValues(text){return text.split(/[;\n]+/).map(function(x){return x.trim();}).filter(Boolean);}
+async function fileValues(file){if(file.size>10485760)throw new Error('הקובץ גדול מדי (עד 10MB)');const rows=await readRows(file);if(!rows.length)throw new Error('הקובץ ריק');const pc=phoneColumn(rows);return rows.slice(pc.header?1:0).map(function(r){return r[pc.best];});}
 function audienceName(f){const l=f.audience_list_id==null?null:AUD.find(function(x){return x.id===f.audience_list_id;});return f.audience_list_id==null?'':' · לרשימה '+(l?l.name:'#'+f.audience_list_id);}
 function renderFlows(){const body=$('b-rows');body.replaceChildren();
  for(const f of FLOWS){const tr=el('tr','click');tr.tabIndex=0;tr.dataset.id=String(f.id);const st=el('td');st.append(el('span','tag'+(f.active?' accent':' off'),f.active?'פעיל':'כבוי'));
-  const ans=el('td');const b=el('button','ghost','תשובות');b.type='button';b.dataset.answers=String(f.id);ans.append(b);if(f.active){const sd=el('button','ghost','שליחה לרשימה');sd.type='button';sd.dataset.send=String(f.id);ans.append(sd);}
+  const ans=el('td');const b=el('button','ghost','תשובות');b.type='button';b.dataset.answers=String(f.id);ans.append(b);if(f.active){const rc=el('button','ghost','רישום הודעה');rc.type='button';rc.dataset.record=String(f.id);rc.title='רישום הודעה שנשלחה ממערכת אחרת';ans.append(rc);}
   tr.append(cell(f.name),cell(labelOf(f.system_number)),cell((f.trigger==='keyword'?'מילת מפתח "'+f.keyword+'"':TRIGGERS[f.trigger])+audienceName(f)),cell(nf.format(f.steps.length)),cell(nf.format(f.live)),cell(nf.format(f.answers)),st,ans);body.append(tr);}
  if(!FLOWS.length){const tr=el('tr');const td=cell('עדיין אין תהליכים','muted');td.colSpan=8;tr.append(td);body.append(tr);}}
 function smsParts(t){const len=t.replace(/\n/g,'\r\n').length;if(!len)return 0;const uni=/[^\x00-\x7f]/.test(t);return len<=(uni?70:140)?1:Math.ceil(len/(uni?67:134));}
@@ -659,17 +688,48 @@ function bfTrigger(t){const was=BF.trigger;BF.trigger=t;if((was==='external')!==
 function openFlow(id){const f=id?FLOWS.find(function(x){return x.id===id;}):null;BF=f?JSON.parse(JSON.stringify({id:f.id,trigger:f.trigger,steps:f.steps})):{id:null,trigger:'any',steps:[{id:'s1',type:'options',text:'',options:[{reply:'1',meaning:'',next:''},{reply:'2',meaning:'',next:''}]}]};
  for(const s of BF.steps){if(s.type==='options'&&!s.options)s.options=[];}
  $('bf-title').textContent=f?'עריכת תהליך':'תהליך חדש';$('bf-name').value=f?f.name:'';const sel=$('bf-number');sel.replaceChildren();for(const n of NUMBERS){const o=el('option','',n.label+' · '+local(n.number));o.value=n.number;sel.append(o);}if(f)sel.value=f.system_number;
- const aud=$('bf-audience');aud.replaceChildren();const all=el('option','','כל הלקוחות');all.value='';aud.append(all);for(const l of AUD){const o=el('option','','רשימה: '+l.name+' ('+nf.format(l.size)+')'+(l.shared?' · משותפת':''));o.value=String(l.id);aud.append(o);}
- if(f&&f.audience_list_id!=null&&!AUD.some(function(l){return l.id===f.audience_list_id;})){const o=el('option','','רשימה #'+f.audience_list_id);o.value=String(f.audience_list_id);aud.append(o);}aud.value=f&&f.audience_list_id!=null?String(f.audience_list_id):'';$('bf-send').hidden=!(f&&f.active);
+ fillAudience(f&&f.audience_list_id!=null?f.audience_list_id:null);$('bf-record').hidden=!(f&&f.active);
  $('bf-keyword').value=f&&f.keyword||'';$('bf-repeat').value=f&&f.repeat_mode||'once';$('bf-expire').value=String(f?f.expire_hours:24);$('bf-fallback').value=f?f.fallback:'';$('bf-active').checked=f?!!f.active:false;$('bf-delete').hidden=!f;$('bf-error').hidden=true;
  $('bf-dlg').showModal();bfTrigger(BF.trigger);bfView(narrowScreen()?'list':'canvas');$('bf-name').focus();}
 for(const b of document.querySelectorAll('[data-trigger]'))b.addEventListener('click',function(){bfTrigger(b.dataset.trigger);});
 $('bf-add-step').addEventListener('click',function(){if(BF.steps.length>=30)return;BF.steps.push({id:newStepId(),type:'options',text:'',options:[{reply:'1',meaning:'',next:''},{reply:'2',meaning:'',next:''}]});renderSteps();});
 $('b-add').addEventListener('click',function(){openFlow(null);});
-// The first message goes out from the compose window on the messages page, with the flow and its list chosen.
-function sendFlow(id){const f=FLOWS.find(function(x){return x.id===id;});if(!f)return;location.href='/#send='+id+(f.audience_list_id!=null?'&list='+f.audience_list_id:'');}
-$('bf-send').addEventListener('click',function(){sendFlow(BF.id);});
-$('b-rows').addEventListener('click',function(e){const a=e.target.closest('[data-answers]');if(a){openAnswers(Number(a.dataset.answers));return;}const sd=e.target.closest('[data-send]');if(sd){sendFlow(Number(sd.dataset.send));return;}const tr=e.target.closest('tr[data-id]');if(tr)openFlow(Number(tr.dataset.id));});
+$('bf-record').addEventListener('click',function(){$('bf-dlg').close();openRecord(BF.id);});
+// Custom numbers for a flow's audience: added to the chosen list, or to a new shared list made for this flow.
+let BN={file:[],fileName:''};
+function bnNumbers(){return parseNumbers(typedValues($('bn-text').value).concat(BN.file));}
+function bnSummary(){const r=bnNumbers();$('bn-sum').textContent=r.numbers.length||r.invalid?plural(r.numbers.length,'מספר תקין אחד','מספרים תקינים')+(r.invalid?' · '+nf.format(r.invalid)+' ערכים שאינם מספרי טלפון':''):'';}
+$('bf-aud-add').addEventListener('click',function(){const l=AUD.find(function(x){return String(x.id)===$('bf-audience').value;});BN={file:[],fileName:''};$('bn-text').value='';$('bn-file-info').textContent='';$('bn-error').hidden=true;bnSummary();
+ $('bn-target').textContent=l?'המספרים יתווספו לרשימה "'+l.name+'". שינוי הרשימה משפיע על כל התהליכים שמשתמשים בה.':'ייווצרה רשימה משותפת חדשה מהמספרים, והיא תהפוך לקהל התהליך.';$('bn-dlg').showModal();$('bn-text').focus();});
+$('bn-text').addEventListener('input',bnSummary);
+$('bn-file').addEventListener('change',async function(){const f=this.files&&this.files[0];this.value='';if(!f)return;try{BN.file=await fileValues(f);BN.fileName=f.name;$('bn-file-info').textContent=f.name+' · '+plural(BN.file.length,'שורה אחת','שורות');$('bn-error').hidden=true;bnSummary();}catch(err){dlgError('bn-error',err);}});
+$('bn-form').addEventListener('submit',async function(e){e.preventDefault();$('bn-error').hidden=true;const r=bnNumbers();if(!r.numbers.length){dlgError('bn-error',new Error('אין מספרים תקינים להוספה'));return;}
+ $('bn-go').disabled=true;try{const l=AUD.find(function(x){return String(x.id)===$('bf-audience').value;});let saved;
+  if(l){const have=(await get('/api/lists/members?id='+l.id)).numbers;saved=await post('/api/lists/save',{id:l.id,name:l.name,shared:!!l.shared,numbers:Array.from(new Set(have.concat(r.numbers)))});saved.id=l.id;}
+  else saved=await post('/api/lists/save',{name:(($('bf-name').value.trim()||'תהליך')+' · קהל').slice(0,60),shared:true,numbers:r.numbers});
+  AUD=(await get('/api/lists')).lists;fillAudience(saved.id);$('bn-dlg').close();toast('הרשימה עודכנה ('+plural(saved.size,'מספר אחד','מספרים')+')');}
+ catch(err){dlgError('bn-error',err);}finally{$('bn-go').disabled=false;}});
+// Recording a first message another system already sent (server: flows/record), in batches of 500 numbers.
+let BR={flow:null,file:[]};
+function brNumbers(){return parseNumbers(typedValues($('br-text').value).concat(BR.file));}
+async function brSummary(){const r=brNumbers();const l=AUD.find(function(x){return String(x.id)===$('br-list').value;});$('br-sum').textContent=(l?'רשימה "'+l.name+'" ('+nf.format(l.size)+') ועוד ':'')+plural(r.numbers.length,'מספר אחד','מספרים')+(r.invalid?' · '+nf.format(r.invalid)+' ערכים שאינם מספרי טלפון':'');}
+function openRecord(id){const f=FLOWS.find(function(x){return x.id===id;});if(!f)return;BR={flow:f,file:[]};$('br-flow').textContent='תהליך "'+f.name+'" · '+labelOf(f.system_number);
+ $('br-body').value=f.steps[0]&&f.steps[0].text||'';const now=Date.now();$('br-date').value=ymd(now);const z=zoned(now);$('br-time').value=pad(z.hour)+':'+pad(z.minute);
+ const sel=$('br-list');sel.replaceChildren();const none=el('option','','בלי רשימה');none.value='';sel.append(none);for(const l of AUD){const o=el('option','',l.name+' ('+nf.format(l.size)+')');o.value=String(l.id);sel.append(o);}sel.value=f.audience_list_id!=null&&AUD.some(function(l){return l.id===f.audience_list_id;})?String(f.audience_list_id):'';
+ $('br-text').value='';$('br-file-info').textContent='';$('br-error').hidden=true;$('br-bar').hidden=true;$('br-status').textContent='';$('br-go').disabled=false;brSummary();$('br-dlg').showModal();$('br-body').focus();}
+$('br-text').addEventListener('input',brSummary);$('br-list').addEventListener('change',brSummary);
+$('br-file').addEventListener('change',async function(){const f=this.files&&this.files[0];this.value='';if(!f)return;try{BR.file=await fileValues(f);$('br-file-info').textContent=f.name+' · '+plural(BR.file.length,'שורה אחת','שורות');$('br-error').hidden=true;brSummary();}catch(err){dlgError('br-error',err);}});
+$('br-form').addEventListener('submit',async function(e){e.preventDefault();$('br-error').hidden=true;$('br-go').disabled=true;
+ try{if(!$('br-body').value.trim())throw new Error('כתבו את נוסח ההודעה שנשלחה');if(!$('br-date').value||!$('br-time').value)throw new Error('בחרו תאריך ושעה');const sentAt=israelTime($('br-date').value,$('br-time').value);if(sentAt>Date.now())throw new Error('מועד השליחה עדיין לא הגיע');
+  let all=brNumbers().numbers;const lid=$('br-list').value;if(lid)all=Array.from(new Set(all.concat((await get('/api/lists/members?id='+lid)).numbers)));
+  if(!all.length)throw new Error('אין נמענים לרישום');
+  if(!await confirmAction('רישום הודעה','לרשום את ההודעה כנשלחה אל '+plural(all.length,'מספר אחד','מספרים')+'? ההודעה לא תישלח שוב, והלקוחות יוכנסו לשלב הראשון של התהליך.','רישום')){$('br-go').disabled=false;return;}
+  const id=crypto.randomUUID();let added=0,skipped=0,invalid=0;$('br-bar').hidden=false;
+  for(let i=0;i<all.length;i+=500){$('br-status').textContent=nf.format(i)+' / '+nf.format(all.length);$('br-progress').style.width=Math.round(i*100/all.length)+'%';
+   const d=await post('/api/admin/flows/record',{flow_id:BR.flow.id,record_id:id,body:$('br-body').value,sent_at:sentAt,numbers:all.slice(i,i+500)});added+=d.added;skipped+=d.skipped;invalid+=d.invalid;}
+  $('br-dlg').close();toast(plural(added,'מספר אחד נרשם','מספרים נרשמו')+(skipped?' · '+nf.format(skipped)+' דולגו (הסרה או בוט כבוי)':'')+(invalid?' · '+nf.format(invalid)+' לא תקינים':''));await loadFlows();}
+ catch(err){dlgError('br-error',err);}finally{$('br-go').disabled=false;}});
+$('b-rows').addEventListener('click',function(e){const a=e.target.closest('[data-answers]');if(a){openAnswers(Number(a.dataset.answers));return;}const rc=e.target.closest('[data-record]');if(rc){openRecord(Number(rc.dataset.record));return;}const tr=e.target.closest('tr[data-id]');if(tr)openFlow(Number(tr.dataset.id));});
 $('b-rows').addEventListener('keydown',function(e){if((e.key==='Enter'||e.key===' ')&&e.target.dataset.id){e.preventDefault();openFlow(Number(e.target.dataset.id));}});
 $('bf-form').addEventListener('submit',async function(e){e.preventDefault();$('bf-error').hidden=true;$('bf-save').disabled=true;
  const steps=BF.steps.map(function(s){const at=s.pos?{pos:s.pos}:{};return s.type==='end'?{id:s.id,type:'end',text:s.text,...at}:s.type==='text'?{id:s.id,type:'text',text:s.text,next:s.next||'',field:s.field||'',...at}:{id:s.id,type:'options',text:s.text,options:s.options,field:s.field||'',...at};});

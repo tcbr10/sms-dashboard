@@ -1,11 +1,12 @@
-import {Env,HttpError,json,phone,readBody,text} from '../../../shared/validation';
+import {Env,HttpError,json,phone,readBody,recipient,text} from '../../../shared/validation';
 import {loadSettings} from '../../../shared/settings';
-import {Flow,Step,normalizeReply,parseFlow,touchThreads} from '../../../shared/bot';
+import {Flow,Step,enterMany,loadFlow,normalizeReply,openThreads,parseFlow,touchThreads} from '../../../shared/bot';
 import {User,audit} from './users';
 import {seesCustomer,seesMessage} from './scope';
 // Bot flows: admins build them; users see a customer's bot state in the messages table and can turn the bot off or on
 // for a customer of their numbers.
 const STEP_ID = /^s[0-9]{1,3}$/;
+const OTHER_SYSTEM = 'מערכת אחרת'; // sent_by of a message recorded here that another system sent
 // Where the step sits on the flow canvas (the editor's layout); the bot never reads it.
 function position(v: unknown): {pos?:{x:number;y:number}} {
  if (v === undefined || v === null) return {};
@@ -94,6 +95,28 @@ export async function flows(request: Request, path: string, url: URL, env: Env, 
   // Conversations waiting on a step that no longer exists are ended.
   await env.DB.batch([env.DB.prepare('DELETE FROM conversations WHERE flow_id=? AND step NOT IN (SELECT json_extract(value,\'$.id\') FROM json_each(?))').bind(saved,JSON.stringify(list)),audit(env,user.email,'flow.save',name,{id:saved,system_number:system,trigger,...(trigger === 'external' ? {repeat_mode:repeat} : {}),steps:list.length,...(audience !== null ? {audience_list_id:audience} : {}),active:!!body.active})]);
   return json({ok:true,id:saved});
+ }
+// POST /api/admin/flows/record: a first message that another system already sent is written into this system, once per
+// number, as the flow's opening message (nothing is sent). It shows at the start of the chat, the customers are put at
+// the flow's first step so their replies continue it, and the bot chats page lists them. The browser sends up to 500
+// numbers per call under one record_id, so a repeated call adds nothing twice. Opted-out and bot-blocked numbers are skipped.
+ if (path === 'flows/record') {
+  const flowId = body.flow_id; if (!Number.isSafeInteger(flowId)) throw new HttpError(400,'Invalid flow');
+  const flow = await loadFlow(env,flowId as number); if (!flow || !flow.steps.length) throw new HttpError(404,'Flow not found');
+  const recordId = body.record_id; if (typeof recordId !== 'string' || !/^[0-9a-f-]{36}$/.test(recordId)) throw new HttpError(400,'Invalid record id');
+  const message = text(typeof body.body === 'string' ? body.body.trim() : body.body,'message',1000);
+  const at = body.sent_at; if (!Number.isSafeInteger(at) || (at as number) < Date.UTC(2020,0,1) || (at as number) > Date.now() + 60000) throw new HttpError(400,'Invalid send time');
+  if (!Array.isArray(body.numbers) || !body.numbers.length || body.numbers.length > 500) throw new HttpError(400,'Send 1 to 500 numbers at a time');
+  const numbers = new Set<string>(); let invalid = 0; for (const n of body.numbers) { try { numbers.add(recipient(n)); } catch { invalid++; } }
+  const eligible = (await env.DB.prepare('SELECT value FROM json_each(?1) WHERE value NOT IN (SELECT number FROM opt_outs) AND value NOT IN (SELECT peer_number FROM bot_blocks WHERE system_number=?2)').bind(JSON.stringify([...numbers]),flow.system_number).all<{value:string}>()).results.map(r => r.value);
+  const now = Date.now(); const first = flow.steps[0];
+  const results = await env.DB.batch([
+   env.DB.prepare("INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,updated_at,sent_by,bot) SELECT json_array('out','first:'||?1||':'||value),'out',?2,value,?3,?4,?5,'provider','accepted',?5,?6,?7 FROM json_each(?8) WHERE true ON CONFLICT(event_key) DO NOTHING").bind(recordId,flow.system_number,message,at,now,OTHER_SYSTEM,JSON.stringify({flow:flow.id,step:first.id,start:true,external:true}),JSON.stringify(eligible)),
+   enterMany(env,flow,first,flow.system_number,eligible,now),
+   openThreads(env,flow.system_number,eligible,flow.id,now),
+   audit(env,user.email,'flow.record',flow.name,{id:flow.id,record_id:recordId,numbers:eligible.length}),
+  ]);
+  return json({ok:true,added:results[0].meta.changes,invalid,skipped:numbers.size - eligible.length});
  }
  if (path === 'flows/delete') {
   const id = body.id; if (!Number.isSafeInteger(id)) throw new HttpError(400,'Invalid flow'); const f = await env.DB.prepare('SELECT name FROM flows WHERE id=?').bind(id).first<{name:string}>(); if (!f) throw new HttpError(404,'Flow not found');

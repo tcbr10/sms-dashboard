@@ -660,17 +660,10 @@ function rescheduleRow(cellEl,s){const box=el('span','sch-edit');const d=el('inp
 $('sched-btn').addEventListener('click',openScheduled);
 for(const id of ['sch-close','sch-done'])$(id).addEventListener('click',function(){$('sch-dlg').close();});
 
-// #send=<flow id>&list=<list id> (from the bot tab of the admin page): opens the compose window with the flow's first message and its list.
-async function openFlowSend(hash){const p=new URLSearchParams(hash.slice(1));const id=Number(p.get('send'));if(!id)return;history.replaceState(null,'',location.pathname+location.search);
- const f=(ME.flows||[]).find(function(x){return x.id===id;});if(!f||!canSend(f.system_number)){toast('התהליך אינו פעיל או שאין הרשאה לשלוח ממנו');return;}
- openCompose(f.system_number);$('c-flow').value=String(f.id);applyComposeFlow();
- const list=Number(p.get('list'));if(list&&ME.can_bulk_send){if(LISTS===null)await loadLists();if((LISTS||[]).some(function(l){return l.id===list;})){try{if(!listNumbers.has(list))listNumbers.set(list,(await get('/api/lists/members?id='+list)).numbers);C.lists.add(list);}catch(e){composeError(message(e));}renderComposeLists();}}
- edited();}
 title();
-const START_HASH=location.hash; // the page rewrites the address while it loads
 (async function(){try{await loadMe();noNumbers=!ME.numbers.length;for(const n of ME.numbers)labels.set(n.number,n.label);
   $('restricted-note').hidden=!ME.numbers.some(function(n){return n.restricted;});buildColumns();readUrl();$('q').value=state.q;const canSendAny=senders().length>0;$('new').hidden=!canSendAny;$('lists-btn').hidden=!canSendAny;$('sched-btn').hidden=!canSendAny;}
  catch(e){fail(e,true);return;}
- await load();schedule();openFlowSend(START_HASH).catch(function(e){toast(message(e));});})();
+ await load();schedule();})();
 `;
 export function page(nonce:string):string { return shell(nonce,'הודעות SMS',css,body,LINKS_JS+script,'app'); }

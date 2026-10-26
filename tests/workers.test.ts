@@ -723,6 +723,16 @@ describe('first question sent from another system',()=>{
  const flow=(b:Record<string,unknown>={})=>api('admin@example.com','/api/admin/flows/save',{name:'ליד',system_number:number,trigger:'external',steps,fallback:'',expire_hours:24,active:true,...b});
  let n=0;const say=async(text:string,from='0509876543')=>{const r=await ingest(callback('json',{origsms:text,msgid:'e'+(++n),phone:from}),env);expect(r.status).toBe(200);return (JSON.parse(await r.text()) as {reply:string}).reply;};
  const note=async(text:string)=>{const r=await env.DB.prepare("SELECT bot FROM messages WHERE direction='in' AND body=? ORDER BY id DESC").bind(text).first<{bot:string|null}>();return r?.bot?JSON.parse(r.bot):null;};
+ it('records a first message that another system sent, as the start of each chat',async()=>{const id=(await body(flow())).id as number;const admin='admin@example.com',key='0b0e0000-0000-4000-8000-000000000001';
+  await env.DB.prepare("INSERT INTO opt_outs (number,source,created_at) VALUES ('+972501111112','keyword',1)").run();
+  const rec=async(extra:Record<string,unknown>={})=>body(api(admin,'/api/admin/flows/record',{flow_id:id,record_id:key,body:'מה מעניין אותך? 1 דירה 2 משרד',sent_at:Date.now()-3600000,numbers:['0501111111','0501111112','bad','0501111111'],...extra}));
+  expect(await rec()).toEqual({ok:true,added:1,invalid:1,skipped:1});expect(await rec()).toMatchObject({added:0});
+  const m=await env.DB.prepare("SELECT direction,body,sent_by,bot,submission_status FROM messages WHERE peer_number='+972501111111'").all<{bot:string}>();expect(m.results).toEqual([{direction:'out',body:'מה מעניין אותך? 1 דירה 2 משרד',sent_by:'מערכת אחרת',bot:JSON.stringify({flow:id,step:'s1',start:true,external:true}),submission_status:'accepted'}]);
+  expect(await env.DB.prepare("SELECT 1 FROM messages WHERE peer_number='+972501111112'").first()).toBeNull();
+  expect(await env.DB.prepare("SELECT flow_id,step FROM conversations WHERE peer_number='+972501111111'").first()).toEqual({flow_id:id,step:'s1'});expect(await env.DB.prepare("SELECT flow_id FROM bot_threads WHERE peer_number='+972501111111'").first()).toEqual({flow_id:id});
+  expect(await say('2','0501111111')).toBe('מה השם?');
+  expect((await api('alice@example.com','/api/admin/flows/record',{flow_id:id,record_id:key,body:'x',sent_at:1,numbers:['0501111111']})).status).toBe(403);
+  expect((await rec({sent_at:Date.now()+86400000})).error).toBeTruthy();expect((await api(admin,'/api/admin/flows/record',{flow_id:id,record_id:'nope',body:'x',sent_at:Date.now()-1000,numbers:['0501111111']})).status).toBe(400);});
  it('reads a customer\'s first message as the answer to the first question, and goes on from there',async()=>{const id=(await body(flow())).id as number;
   expect(await say('1')).toBe('מה השם?');expect(await note('1')).toEqual({flow:id,step:'s1',match:'option',external:true});
   expect(await say('דנה')).toBe('תודה!');
