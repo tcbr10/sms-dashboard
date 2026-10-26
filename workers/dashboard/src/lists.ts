@@ -34,6 +34,7 @@ export async function lists(request: Request, url: URL, env: Env, user: User): P
  }
  if (url.pathname === '/api/lists/delete') {
   const l = await find(env,body.id); if (!editable(l,user)) throw new HttpError(403,'You cannot delete this list');
+  const used = await env.DB.prepare('SELECT name FROM flows WHERE audience_list_id=? LIMIT 1').bind(l.id).first<{name:string}>(); if (used) throw new HttpError(409,'The bot flow "'+used.name+'" is for this list. Change or remove its audience first.');
   await env.DB.batch([env.DB.prepare('DELETE FROM list_members WHERE list_id=?').bind(l.id),env.DB.prepare('DELETE FROM lists WHERE id=?').bind(l.id),audit(env,user.email,'list.delete',l.name,{id:l.id})]);
   return json({ok:true});
  }

@@ -10,8 +10,9 @@ export type Option = {reply:string;meaning:string;next:string;say?:string};
 export type Step = {id:string;text:string;type:'options'|'text'|'end';options?:Option[];next?:string;field?:string;pos?:{x:number;y:number}};
 // trigger 'external': the first question was sent by another system, so a customer's message (when they are in no
 // conversation) is read as the answer to the first step. repeat_mode says whether someone who already went through
-// such a flow is read that way again ('always') or not ('once').
-export type Flow = {id:number;name:string;system_number:string;trigger:'any'|'keyword'|'send'|'external';keyword:string|null;steps:Step[];fallback:string;expire_hours:number;active:number;repeat_mode:'once'|'always'};
+// such a flow is read that way again ('always') or not ('once'). audience_list_id limits the flow to the customers on
+// a distribution list: for anyone else it does not start or read their message (a conversation already under way goes on).
+export type Flow = {id:number;name:string;system_number:string;trigger:'any'|'keyword'|'send'|'external';keyword:string|null;steps:Step[];fallback:string;expire_hours:number;active:number;repeat_mode:'once'|'always';audience_list_id:number|null};
 type Conversation = {flow_id:number;step:string;retries:number;expires_at:number};
 export const DEFAULT_FALLBACK = 'לא זיהינו את התשובה.';
 const MAX_RETRIES = 2; // an unrecognized reply repeats the question twice, then the conversation ends
@@ -100,7 +101,11 @@ export async function handleIncoming(env: Env, m: {id:number;inserted:boolean;sy
   if (conv) writes.push(end);
   // A keyword flow whose keyword is the whole message or its first word wins over a flow that starts on any message or
   // whose first question was sent elsewhere (only one of those two can be active on a number).
-  const flows = (await env.DB.prepare("SELECT * FROM flows WHERE system_number=? AND active=1 AND trigger IN ('any','keyword','external')").bind(m.system).all<Omit<Flow,'steps'> & {steps:string}>()).results.map(parseFlow);
+  const active = (await env.DB.prepare("SELECT * FROM flows WHERE system_number=? AND active=1 AND trigger IN ('any','keyword','external')").bind(m.system).all<Omit<Flow,'steps'> & {steps:string}>()).results.map(parseFlow);
+  // A flow with an audience reacts only to customers on its list, and wins over a flow for everyone.
+  const lists = [...new Set(active.map(f => f.audience_list_id).filter((x): x is number => x !== null))];
+  const member = new Set(lists.length ? (await env.DB.prepare('SELECT list_id FROM list_members WHERE number=?1 AND list_id IN (SELECT value FROM json_each(?2))').bind(m.peer, JSON.stringify(lists)).all<{list_id:number}>()).results.map(r => r.list_id) : []);
+  const flows = active.filter(f => f.audience_list_id === null || member.has(f.audience_list_id)).sort((a, b) => Number(b.audience_list_id !== null) - Number(a.audience_list_id !== null) || a.id - b.id);
   const text = normalizeReply(m.body), first = text.split(' ')[0];
   const keyword = flows.find(f => f.trigger === 'keyword' && f.keyword && [text, first].includes(normalizeReply(f.keyword)));
   const external = keyword ? undefined : flows.find(f => f.trigger === 'external' && f.steps[0] && f.steps[0].type !== 'end');

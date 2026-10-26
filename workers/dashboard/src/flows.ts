@@ -76,19 +76,23 @@ export async function flows(request: Request, path: string, url: URL, env: Env, 
   const expire = body.expire_hours; if (!Number.isInteger(expire) || (expire as number) < 1 || (expire as number) > 720) throw new HttpError(400,'Expiry must be 1 to 720 hours');
   if (typeof body.active !== 'boolean') throw new HttpError(400,'active must be true or false');
   if (!await env.DB.prepare('SELECT 1 FROM system_numbers WHERE number=?').bind(system).first()) throw new HttpError(400,'Unknown system number');
+  // The customers a flow is for: a shared list or one of the admin's own. A flow started from the dashboard goes to whoever it is sent to.
+  const audience = trigger === 'send' || body.audience_list_id === undefined || body.audience_list_id === null ? null : body.audience_list_id;
+  if (audience !== null && (!Number.isSafeInteger(audience) || !await env.DB.prepare('SELECT 1 FROM lists WHERE id=? AND (shared=1 OR owner=?)').bind(audience,user.email).first())) throw new HttpError(400,'Unknown list');
   const id = body.id === undefined || body.id === null ? null : body.id; if (id !== null && !Number.isSafeInteger(id)) throw new HttpError(400,'Invalid flow');
   // Only one active flow may answer any message on a number (starting on it, or reading it as the answer to a first
   // question sent elsewhere), and a keyword starts one flow only.
-  if (body.active) { const others = (await env.DB.prepare('SELECT id,name,trigger,keyword FROM flows WHERE system_number=? AND active=1 AND id!=?').bind(system,id ?? 0).all<{name:string;trigger:string;keyword:string|null}>()).results;
+  // Flows for different audiences don't clash: a customer on the list gets the flow made for it.
+  if (body.active) { const others = (await env.DB.prepare('SELECT id,name,trigger,keyword FROM flows WHERE system_number=? AND active=1 AND id!=? AND audience_list_id IS ?').bind(system,id ?? 0,audience).all<{name:string;trigger:string;keyword:string|null}>()).results;
    const every = (t: string) => t === 'any' || t === 'external';
    const clash = others.find(o => (every(trigger) && every(o.trigger)) || (trigger === 'keyword' && o.trigger === 'keyword' && o.keyword === keyword));
    if (clash) throw new HttpError(409,'The active flow "'+clash.name+'" already '+(every(trigger) ? 'answers every message on this number' : 'uses this keyword')); }
-  const now = Date.now(); const values = [name,system,trigger,keyword,JSON.stringify(list),fallback,expire,body.active?1:0,repeat,now];
+  const now = Date.now(); const values = [name,system,trigger,keyword,JSON.stringify(list),fallback,expire,body.active?1:0,repeat,audience,now];
   let saved: number;
-  if (id === null) saved = (await env.DB.prepare('INSERT INTO flows (name,system_number,trigger,keyword,steps,fallback,expire_hours,active,repeat_mode,updated_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING id').bind(...values,now).first<{id:number}>())!.id;
-  else { const r = await env.DB.prepare('UPDATE flows SET name=?,system_number=?,trigger=?,keyword=?,steps=?,fallback=?,expire_hours=?,active=?,repeat_mode=?,updated_at=? WHERE id=?').bind(...values,id).run(); if (!r.meta.changes) throw new HttpError(404,'Flow not found'); saved = id as number; }
+  if (id === null) saved = (await env.DB.prepare('INSERT INTO flows (name,system_number,trigger,keyword,steps,fallback,expire_hours,active,repeat_mode,audience_list_id,updated_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id').bind(...values,now).first<{id:number}>())!.id;
+  else { const r = await env.DB.prepare('UPDATE flows SET name=?,system_number=?,trigger=?,keyword=?,steps=?,fallback=?,expire_hours=?,active=?,repeat_mode=?,audience_list_id=?,updated_at=? WHERE id=?').bind(...values,id).run(); if (!r.meta.changes) throw new HttpError(404,'Flow not found'); saved = id as number; }
   // Conversations waiting on a step that no longer exists are ended.
-  await env.DB.batch([env.DB.prepare('DELETE FROM conversations WHERE flow_id=? AND step NOT IN (SELECT json_extract(value,\'$.id\') FROM json_each(?))').bind(saved,JSON.stringify(list)),audit(env,user.email,'flow.save',name,{id:saved,system_number:system,trigger,...(trigger === 'external' ? {repeat_mode:repeat} : {}),steps:list.length,active:!!body.active})]);
+  await env.DB.batch([env.DB.prepare('DELETE FROM conversations WHERE flow_id=? AND step NOT IN (SELECT json_extract(value,\'$.id\') FROM json_each(?))').bind(saved,JSON.stringify(list)),audit(env,user.email,'flow.save',name,{id:saved,system_number:system,trigger,...(trigger === 'external' ? {repeat_mode:repeat} : {}),steps:list.length,...(audience !== null ? {audience_list_id:audience} : {}),active:!!body.active})]);
   return json({ok:true,id:saved});
  }
  if (path === 'flows/delete') {
