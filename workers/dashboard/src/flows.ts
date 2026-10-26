@@ -6,14 +6,15 @@ import {seesCustomer,seesMessage} from './scope';
 // Bot flows: admins build them; users see a customer's bot state in the messages table and can turn the bot off or on
 // for a customer of their numbers.
 const STEP_ID = /^s[0-9]{1,3}$/;
-function steps(value: unknown, fields: Set<string>): Step[] {
+// optionalFirst: a first question sent from another system needs no text here (it is only used to ask again).
+function steps(value: unknown, fields: Set<string>, optionalFirst = false): Step[] {
  if (!Array.isArray(value) || !value.length || value.length > 30) throw new HttpError(400,'A flow has 1 to 30 steps');
  const ids = new Set<string>(); for (const s of value) { const id = (s as Step)?.id; if (typeof id !== 'string' || !STEP_ID.test(id) || ids.has(id)) throw new HttpError(400,'Invalid step id'); ids.add(id); }
  const next = (v: unknown) => { if (v === undefined || v === null || v === '') return ''; if (typeof v !== 'string' || !ids.has(v)) throw new HttpError(400,'A step points to a step that does not exist'); return v; };
  const field = (v: unknown) => { if (v === undefined || v === null || v === '') return ''; if (typeof v !== 'string' || !fields.has(v)) throw new HttpError(400,'Unknown contact field'); return v; };
  return value.map((raw, i) => {
   const s = raw as Record<string,unknown>; const n = 'Step '+(i+1);
-  const t = text(typeof s.text === 'string' ? s.text.trim() : s.text,n+' text',1000); const type = s.type;
+  const t = optionalFirst && i === 0 && (s.text === undefined || s.text === null || (typeof s.text === 'string' && !s.text.trim())) ? '' : text(typeof s.text === 'string' ? s.text.trim() : s.text,n+' text',1000); const type = s.type;
   if (type === 'end') return {id:s.id as string,text:t,type};
   if (type === 'text') return {id:s.id as string,text:t,type,next:next(s.next),field:field(s.field)};
   if (type !== 'options') throw new HttpError(400,n+': invalid type');
@@ -21,7 +22,9 @@ function steps(value: unknown, fields: Set<string>): Step[] {
   const seen = new Set<string>();
   const options = s.options.map(o => { const v = o as Record<string,unknown>; const reply = text(typeof v.reply === 'string' ? v.reply.trim() : v.reply,n+' answer',60);
    for (const r of reply.split(',').map(normalizeReply).filter(Boolean)) { if (seen.has(r)) throw new HttpError(400,n+': the answer "'+r+'" appears twice'); seen.add(r); }
-   const meaning = typeof v.meaning === 'string' ? v.meaning.trim().slice(0,60) : ''; return {reply,meaning,next:next(v.next)}; });
+   const meaning = typeof v.meaning === 'string' ? v.meaning.trim().slice(0,60) : '';
+   const say = v.say === undefined || v.say === null ? '' : typeof v.say === 'string' && v.say.trim().length <= 1000 ? v.say.trim() : (() => { throw new HttpError(400,n+': a reply has at most 1,000 characters'); })();
+   return {reply,meaning,next:next(v.next),...(say ? {say} : {})}; });
   return {id:s.id as string,text:t,type,options,field:field(s.field)};
  });
 }
@@ -61,7 +64,7 @@ export async function flows(request: Request, path: string, url: URL, env: Env, 
   // Only for a first question sent elsewhere: read a customer's message that way once, or every time they write.
   const repeat = body.repeat_mode === undefined ? 'once' : body.repeat_mode; if (repeat !== 'once' && repeat !== 'always') throw new HttpError(400,'repeat_mode must be once or always');
   const keyword = trigger === 'keyword' ? normalizeReply(text(body.keyword,'keyword',30)) : null; if (trigger === 'keyword' && !keyword) throw new HttpError(400,'Enter a keyword');
-  const list = steps(body.steps,fields); if (trigger === 'external' && list[0].type === 'end') throw new HttpError(400,'The first step must be a question when it is sent from another system'); const fallback = typeof body.fallback === 'string' ? body.fallback.trim().slice(0,300) : '';
+  const list = steps(body.steps,fields,trigger === 'external'); if (trigger === 'external' && list[0].type === 'end') throw new HttpError(400,'The first step must be a question when it is sent from another system'); const fallback = typeof body.fallback === 'string' ? body.fallback.trim().slice(0,300) : '';
   const expire = body.expire_hours; if (!Number.isInteger(expire) || (expire as number) < 1 || (expire as number) > 720) throw new HttpError(400,'Expiry must be 1 to 720 hours');
   if (typeof body.active !== 'boolean') throw new HttpError(400,'active must be true or false');
   if (!await env.DB.prepare('SELECT 1 FROM system_numbers WHERE number=?').bind(system).first()) throw new HttpError(400,'Unknown system number');

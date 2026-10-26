@@ -16,7 +16,8 @@ export async function numbersFor(env: Env, user: User): Promise<Access[]> {
 export async function flowsFor(env: Env, user: User): Promise<{id:number;name:string;system_number:string;first:string}[]> {
  const numbers = (await numbersFor(env,user)).filter(n => n.can_send).map(n => n.number); if (!numbers.length) return [];
  const rows = (await env.DB.prepare('SELECT * FROM flows WHERE active=1 AND system_number IN (SELECT value FROM json_each(?)) ORDER BY name').bind(JSON.stringify(numbers)).all<Omit<Flow,'steps'> & {steps:string}>()).results.map(parseFlow);
- return rows.map(f => ({id:f.id,name:f.name,system_number:f.system_number,first:f.steps[0]?.text ?? ''}));
+ // A flow whose first question was sent elsewhere may have no first text, and so can't be started from here.
+ return rows.filter(f => f.steps[0]?.text).map(f => ({id:f.id,name:f.name,system_number:f.system_number,first:f.steps[0].text}));
 }
 // The sender IDs a user may send as: admins every active one, others those an admin assigned to them. A text name
 // Micropay refused is left out.

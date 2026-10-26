@@ -4,7 +4,9 @@ import {hasVariables,render} from './template';
 // Auto-reply flows. A conversation (system number + customer) remembers its current step, so the same reply ("1") is
 // read against the options of whichever question was asked last. Replies go out as the answer to Micropay's
 // incoming-SMS webhook, so they need no API call and come from the same number.
-export type Option = {reply:string;meaning:string;next:string};
+// say: the bot's reply when this answer is chosen. It is sent instead of the next step's text (the conversation then
+// waits at the next step), or alone when the answer ends the conversation.
+export type Option = {reply:string;meaning:string;next:string;say?:string};
 export type Step = {id:string;text:string;type:'options'|'text'|'end';options?:Option[];next?:string;field?:string};
 // trigger 'external': the first question was sent by another system, so a customer's message (when they are in no
 // conversation) is read as the answer to the first step. repeat_mode says whether someone who already went through
@@ -78,7 +80,8 @@ export async function handleIncoming(env: Env, m: {id:number;inserted:boolean;sy
   const option = step.type === 'options' ? matchOption(step, m.body) : undefined; const ext = external ? {external:true} : {};
   if (step.type === 'options' && !option) {
    const retry = retries + 1; heard = {flow:flow.id,step:step.id,match:'none',...(retries < MAX_RETRIES ? {retry} : {gave_up:true}),...ext};
-   if (retries < MAX_RETRIES) { reply = (flow.fallback || DEFAULT_FALLBACK) + '\n' + step.text; said = {flow:flow.id,step:step.id,retry};
+   // A first question sent elsewhere may have no text here; then only the fallback goes out.
+   if (retries < MAX_RETRIES) { reply = (flow.fallback || DEFAULT_FALLBACK) + (step.text ? '\n' + step.text : ''); said = {flow:flow.id,step:step.id,retry};
     if (external) writes.push(enter(env, flow, step, m.system, m.peer, now));
     writes.push(env.DB.prepare('UPDATE conversations SET retries=retries+1,updated_at=?,expires_at=? WHERE system_number=? AND peer_number=?').bind(now, now + flow.expire_hours * 3600000, m.system, m.peer)); }
    else writes.push(end);
@@ -87,7 +90,9 @@ export async function handleIncoming(env: Env, m: {id:number;inserted:boolean;sy
    writes.push(env.DB.prepare('INSERT INTO bot_answers (flow_id,system_number,peer_number,step,question,answer,meaning,message_id,at) VALUES (?,?,?,?,?,?,?,?,?)').bind(flow.id, m.system, m.peer, step.id, step.text, m.body.slice(0, 1000), meaning, m.id, now));
    if (step.field) writes.push(saveField(env, m.peer, step.field, meaning ?? m.body, now));
    const next = flow.steps.find(s => s.id === (option ? option.next : step.next));
-   if (next) { reply = next.text; said = {flow:flow.id,step:next.id,...(next.type === 'end' ? {end:true} : {})}; writes.push(enter(env, flow, next, m.system, m.peer, now)); } else writes.push(end);
+   const say = option?.say?.trim();
+   if (next) { reply = say || next.text; said = {flow:flow.id,step:next.id,...(next.type === 'end' ? {end:true} : {})}; writes.push(enter(env, flow, next, m.system, m.peer, now)); }
+   else { if (say) { reply = say; said = {flow:flow.id,end:true}; } writes.push(end); }
   }
  };
  if (flow && step && conv && step.type !== 'end') answer(flow, step, conv.retries, false);

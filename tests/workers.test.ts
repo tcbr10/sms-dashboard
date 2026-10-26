@@ -733,9 +733,26 @@ describe('first question sent from another system',()=>{
   await env.DB.prepare("INSERT INTO opt_outs (number,source,created_at) VALUES ('+972521234567','manual',1)").run();expect(await say('1','0521234567')).toBe('');
   await env.DB.prepare("INSERT INTO bot_blocks (system_number,peer_number,created_at,created_by) VALUES (?,'+972546667788',1,'x')").bind(number).run();expect(await say('1','0546667788')).toBe('');
   expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM flow_customers").first()).toEqual({n:1});});
+ it('replies to each answer of the first message right away, with no first question needed',async()=>{
+  const replies=[{id:'s1',type:'options',text:'',options:[{reply:'1',meaning:'דירה',next:'',say:'מעולה! נציג יחזור אליך היום'},{reply:'2',meaning:'משרד',next:'s2',say:'באיזה אזור?'},{reply:'3',meaning:'אחר',next:'s3'}]},
+   {id:'s2',type:'options',text:'באיזה אזור? צפון או דרום',options:[{reply:'צפון',meaning:'צפון',next:'',say:'תודה, נחזור אליך'},{reply:'דרום',meaning:'דרום',next:''}]},{id:'s3',type:'end',text:'ספרו לנו במה מדובר'}];
+  const id=(await body(flow({steps:replies}))).id as number;
+  expect(await say('1')).toBe('מעולה! נציג יחזור אליך היום');expect(await env.DB.prepare('SELECT 1 FROM conversations').first()).toBeNull();
+  expect(JSON.parse((await env.DB.prepare("SELECT bot FROM messages WHERE sent_by='בוט'").first<{bot:string}>())!.bot)).toEqual({flow:id,end:true});
+  expect(await say('2','0521234567')).toBe('באיזה אזור?');expect(await env.DB.prepare('SELECT step FROM conversations').first()).toEqual({step:'s2'});
+  expect(await say('מערב','0521234567')).toBe('לא זיהינו את התשובה.\nבאיזה אזור? צפון או דרום');expect(await say('צפון','0521234567')).toBe('תודה, נחזור אליך');
+  expect(await say('דרום','0546667788')).toBe('לא זיהינו את התשובה.');expect(await say('3','0546667788')).toBe('ספרו לנו במה מדובר');
+  expect((await env.DB.prepare("SELECT meaning FROM bot_answers WHERE peer_number='+972521234567' ORDER BY id").all()).results).toEqual([{meaning:'משרד'},{meaning:'צפון'}]);
+  // The same replies work in any flow.
+  await env.DB.prepare('UPDATE flows SET active=0').run();
+  await api('admin@example.com','/api/admin/flows/save',{name:'רגיל',system_number:number,trigger:'any',steps:[{id:'s1',type:'options',text:'1 או 2?',options:[{reply:'1',meaning:'',next:'',say:'בחרת 1'},{reply:'2',meaning:'',next:''}]}],fallback:'',expire_hours:24,active:true});
+  expect(await say('היי','0587654321')).toBe('1 או 2?');expect(await say('1','0587654321')).toBe('בחרת 1');});
  it('validates: one flow per number answers every message, and the first step must ask something',async()=>{expect((await flow()).status).toBe(200);
   expect((await api('admin@example.com','/api/admin/flows/save',{name:'כל הודעה',system_number:number,trigger:'any',steps,fallback:'',expire_hours:24,active:true})).status).toBe(409);
   expect((await flow({name:'עוד אחד'})).status).toBe(409);expect((await flow({name:'כבוי',active:false})).status).toBe(200);
-  expect((await flow({name:'סוף',active:false,steps:[{id:'s1',type:'end',text:'תודה'}]})).status).toBe(400);expect((await flow({name:'x',active:false,repeat_mode:'sometimes'})).status).toBe(400);
+  expect((await flow({name:'סוף',active:false,steps:[{id:'s1',type:'end',text:'תודה'}]})).status).toBe(400);
+  const empty=[{id:'s1',type:'options',text:'',options:[{reply:'1',meaning:'',next:'',say:'תודה'}]}];expect((await flow({name:'בלי שאלה',active:false,steps:empty})).status).toBe(200);
+  expect((await api('admin@example.com','/api/admin/flows/save',{name:'רגיל',system_number:other,trigger:'any',steps:empty,fallback:'',expire_hours:24,active:false})).status).toBe(400);
+  expect((await flow({name:'ארוך',active:false,steps:[{id:'s1',type:'options',text:'',options:[{reply:'1',meaning:'',next:'',say:'x'.repeat(1001)}]}]})).status).toBe(400);expect((await flow({name:'x',active:false,repeat_mode:'sometimes'})).status).toBe(400);
   const f=((await body(api('admin@example.com','/api/admin/flows'))).flows as {name:string;trigger:string;repeat_mode:string}[]).find(x=>x.name==='ליד')!;expect(f).toMatchObject({trigger:'external',repeat_mode:'once'});});
 });

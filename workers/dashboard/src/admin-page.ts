@@ -45,10 +45,11 @@ const css = String.raw`
 .steps{display:grid;gap:12px}
 .step-card{display:grid;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--field)}
 .step-head{display:flex;align-items:center;gap:8px}.step-head .end{display:flex;gap:2px}.step-head b{font-size:14px}.step-head select{width:auto;min-height:32px}
-.opt-row{display:grid;grid-template-columns:110px minmax(0,1fr) minmax(0,1fr) 32px;gap:6px;align-items:center}
+.opt-row{display:grid;grid-template-columns:90px minmax(0,.8fr) minmax(0,1.4fr) minmax(0,1fr) 32px;gap:6px;align-items:center}
+.opt-row textarea{min-height:36px;padding-block:6px;resize:vertical}
 .opt-row input,.opt-row select{min-height:32px}
 .opt-head{font-size:12px;color:var(--muted)}
-@media (max-width:760px){.opt-row{grid-template-columns:80px minmax(0,1fr) 32px}.opt-row .opt-next{grid-column:2/3}}
+@media (max-width:760px){.opt-row{grid-template-columns:80px minmax(0,1fr) 32px}.opt-row textarea,.opt-row .opt-next{grid-column:1 / -1}.opt-head span:nth-child(3),.opt-head span:nth-child(4){display:none}.opt-row .opt-next{grid-column:2/3}}
 .secret-row{display:flex;gap:8px;align-items:center}.secret-row input{flex:1;min-width:0;font-family:ui-monospace,monospace;font-size:12.5px}
 `;
 const userDialog = String.raw`
@@ -623,24 +624,28 @@ function nextSelect(current,value,onChange){const sel=el('select','opt-next');co
 function fieldSelect(value,label,onChange){const l=el('label','row hint');const sel=el('select');const none=el('option','','לא לשמור');none.value='';sel.append(none);for(const f of SETTINGS.contact_fields){const o=el('option','',f.label);o.value=f.id;sel.append(o);}
  sel.value=value||'';sel.addEventListener('change',function(){onChange(sel.value);});l.append(label,sel);return l;}
 function renderSteps(){const box=$('bf-steps');box.replaceChildren();
- BF.steps.forEach(function(s,i){const card=el('div','step-card');const head=el('div','step-head');head.append(el('b','','שלב '+(i+1)));
+ // With a first question sent elsewhere, step 1 holds the replies to the customer's first message; its question text
+ // is optional and only used to ask again after an unrecognized answer.
+ BF.steps.forEach(function(s,i){const card=el('div','step-card');const head=el('div','step-head');const ext=BF.trigger==='external'&&i===0;head.append(el('b','','שלב '+(i+1)+(ext?' · תשובות להודעה הראשונה של הלקוח':'')));
   const type=el('select');for(const t of [['options','שאלה עם תשובות'],['text','שאלה פתוחה'],['end','הודעת סיום']]){const o=el('option','',t[1]);o.value=t[0];type.append(o);}type.value=s.type;
   type.addEventListener('change',function(){s.type=type.value;if(s.type==='options'&&!(s.options&&s.options.length))s.options=[{reply:'1',meaning:'',next:''}];renderSteps();});head.append(type);
   const tools=el('span','end');if(i>0){const up=el('button','icon-btn');up.type='button';up.setAttribute('aria-label','הזזה למעלה');up.append(icon('asc'));up.addEventListener('click',function(){BF.steps.splice(i,1);BF.steps.splice(i-1,0,s);renderSteps();});tools.append(up);}
   if(BF.steps.length>1){const del=el('button','icon-btn');del.type='button';del.setAttribute('aria-label','מחיקת השלב');del.append(icon('trash'));del.addEventListener('click',function(){BF.steps.splice(i,1);for(const o of BF.steps){if(o.next===s.id)o.next='';for(const op of o.options||[])if(op.next===s.id)op.next='';}renderSteps();});tools.append(del);}
-  head.append(tools);const ta=el('textarea');ta.rows=2;ta.maxLength=1000;ta.value=s.text;ta.placeholder=s.type==='end'?'ההודעה האחרונה ללקוח':'השאלה ללקוח';const count=el('span','hint');
+  head.append(tools);const ta=el('textarea');ta.rows=2;ta.maxLength=1000;ta.value=s.text;ta.placeholder=ext?'נוסח השאלה שנשלחה (לא חובה; נשלח רק כשהתשובה לא מזוהה)':s.type==='end'?'ההודעה האחרונה ללקוח':'השאלה ללקוח';const count=el('span','hint');
   const upd=function(){count.textContent=nf.format(s.text.length)+' תווים · '+smsParts(s.text)+' SMS';};ta.addEventListener('input',function(){s.text=ta.value;upd();});ta.addEventListener('change',renderSteps);upd();card.append(head,ta,count);
-  if(s.type==='options'){const hd=el('div','opt-row opt-head');hd.append(el('span','','תשובה'),el('span','','משמעות (נשמרת)'),el('span','','השלב הבא'),el('span'));card.append(hd);
+  if(s.type==='options'){const hd=el('div','opt-row opt-head');hd.append(el('span','','תשובה'),el('span','','משמעות (נשמרת)'),el('span','','תגובת הבוט (לא חובה)'),el('span','','ואז'),el('span'));card.append(hd);
    s.options.forEach(function(o,k){const row=el('div','opt-row');const r=el('input');r.value=o.reply;r.maxLength=60;r.placeholder='1';r.setAttribute('aria-label','תשובה');r.addEventListener('input',function(){o.reply=r.value;});
     const m=el('input');m.value=o.meaning;m.maxLength=60;m.placeholder='לדוגמה: מעוניין';m.setAttribute('aria-label','משמעות');m.addEventListener('input',function(){o.meaning=m.value;});
+    const say=el('textarea');say.rows=1;say.maxLength=1000;say.value=o.say||'';say.placeholder='מה הבוט עונה לתשובה הזו';say.setAttribute('aria-label','תגובת הבוט לתשובה '+(o.reply||''));say.addEventListener('input',function(){o.say=say.value;});
     const x=el('button','icon-btn');x.type='button';x.setAttribute('aria-label','הסרת התשובה');x.append(icon('close'));x.disabled=s.options.length<2;x.addEventListener('click',function(){s.options.splice(k,1);renderSteps();});
-    row.append(r,m,nextSelect(s,o.next,function(v){o.next=v;}),x);card.append(row);});
+    row.append(r,m,say,nextSelect(s,o.next,function(v){o.next=v;}),x);card.append(row);});
+   card.append(el('p','hint','תגובה לתשובה נשלחת מיד, במקום הטקסט של השלב הבא. "ואז": סיום השיחה, או מעבר לשלב שמחכה לתשובה הבאה (הטקסט שלו נשלח רק כשתשובה לא מזוהה). בלי תגובה נשלח הטקסט של השלב הבא, כמו עד עכשיו.'));
    const add=el('button','ghost');add.type='button';add.append(icon('plus'),'הוספת תשובה');add.disabled=s.options.length>=20;add.addEventListener('click',function(){s.options.push({reply:String(s.options.length+1),meaning:'',next:''});renderSteps();});
    const row=el('div','row');row.append(add,fieldSelect(s.field,'שמירת המשמעות בשדה',function(v){s.field=v;}));card.append(row);}
   else if(s.type==='text'){const row=el('div','row');const l=el('label','row hint');l.append('השלב הבא',nextSelect(s,s.next,function(v){s.next=v;}));row.append(l,fieldSelect(s.field,'שמירת התשובה בשדה',function(v){s.field=v;}));card.append(row);}
   box.append(card);});}
-function bfTrigger(t){BF.trigger=t;for(const b of document.querySelectorAll('[data-trigger]'))b.setAttribute('aria-pressed',String(b.dataset.trigger===t));$('bf-keyword').hidden=t!=='keyword';$('bf-repeat-row').hidden=t!=='external';
- $('bf-trigger-hint').textContent=t==='any'?'כל הודעה של לקוח שאינו באמצע שיחה מתחילה את התהליך. רק תהליך פעיל אחד במספר יכול לעבוד כך.':t==='keyword'?'הודעה שהיא מילת המפתח, או שמתחילה בה, מתחילה את התהליך.':t==='external'?'השאלה הראשונה נשלחת ממערכת אחרת, ולכן הבוט לא שולח אותה. הודעה של לקוח שאינו באמצע שיחה נקראת כתשובה לשלב הראשון (למשל 1, 2, 3). תשובה לא מזוהה מקבלת את השאלה הראשונה מהבוט, לכן כדאי להעתיק לשלב הראשון את נוסח השאלה שנשלחה. מילת מפתח של תהליך אחר קודמת לזה, ורק תהליך פעיל אחד במספר יכול לעבוד כך או על כל הודעה.':'התהליך מתחיל רק כשבוחרים אותו בחלון שליחת הודעה. השלב הראשון נשלח לנמענים, ותשובותיהם ממשיכות את התהליך.';}
+function bfTrigger(t){const was=BF.trigger;BF.trigger=t;if((was==='external')!==(t==='external')&&$('bf-steps').children.length)renderSteps();for(const b of document.querySelectorAll('[data-trigger]'))b.setAttribute('aria-pressed',String(b.dataset.trigger===t));$('bf-keyword').hidden=t!=='keyword';$('bf-repeat-row').hidden=t!=='external';
+ $('bf-trigger-hint').textContent=t==='any'?'כל הודעה של לקוח שאינו באמצע שיחה מתחילה את התהליך. רק תהליך פעיל אחד במספר יכול לעבוד כך.':t==='keyword'?'הודעה שהיא מילת המפתח, או שמתחילה בה, מתחילה את התהליך.':t==='external'?'השאלה הראשונה נשלחת ממערכת אחרת, ולכן הבוט לא שולח אותה. הודעה של לקוח שאינו באמצע שיחה נקראת כתשובה לשלב הראשון (למשל 1, 2, 3), ולכל תשובה אפשר לכתוב את תגובת הבוט. תשובה לא מזוהה מקבלת את ההודעה לתשובה לא מזוהה, ואת נוסח השאלה אם כתבתם אותו בשלב הראשון. מילת מפתח של תהליך אחר קודמת לזה, ורק תהליך פעיל אחד במספר יכול לעבוד כך או על כל הודעה.':'התהליך מתחיל רק כשבוחרים אותו בחלון שליחת הודעה. השלב הראשון נשלח לנמענים, ותשובותיהם ממשיכות את התהליך.';}
 function openFlow(id){const f=id?FLOWS.find(function(x){return x.id===id;}):null;BF=f?JSON.parse(JSON.stringify({id:f.id,trigger:f.trigger,steps:f.steps})):{id:null,trigger:'any',steps:[{id:'s1',type:'options',text:'',options:[{reply:'1',meaning:'',next:''},{reply:'2',meaning:'',next:''}]}]};
  for(const s of BF.steps){if(s.type==='options'&&!s.options)s.options=[];}
  $('bf-title').textContent=f?'עריכת תהליך':'תהליך חדש';$('bf-name').value=f?f.name:'';const sel=$('bf-number');sel.replaceChildren();for(const n of NUMBERS){const o=el('option','',n.label+' · '+local(n.number));o.value=n.number;sel.append(o);}if(f)sel.value=f.system_number;
