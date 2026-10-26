@@ -7,7 +7,7 @@ import {hasVariables,render} from './template';
 // say: the bot's reply when this answer is chosen. It is sent instead of the next step's text (the conversation then
 // waits at the next step), or alone when the answer ends the conversation.
 export type Option = {reply:string;meaning:string;next:string;say?:string};
-export type Step = {id:string;text:string;type:'options'|'text'|'end';options?:Option[];next?:string;field?:string};
+export type Step = {id:string;text:string;type:'options'|'text'|'end';options?:Option[];next?:string;field?:string;pos?:{x:number;y:number}};
 // trigger 'external': the first question was sent by another system, so a customer's message (when they are in no
 // conversation) is read as the answer to the first step. repeat_mode says whether someone who already went through
 // such a flow is read that way again ('always') or not ('once').

@@ -1,4 +1,5 @@
 import {header,shell,svg} from './ui';
+import {FLOW_CANVAS_CSS,FLOW_CANVAS_JS} from './flow-canvas';
 const css = String.raw`
 .spark{display:block}
 .spark rect{fill:var(--accent)}
@@ -51,7 +52,7 @@ const css = String.raw`
 .opt-head{font-size:12px;color:var(--muted)}
 @media (max-width:760px){.opt-row{grid-template-columns:80px minmax(0,1fr) 32px}.opt-row textarea,.opt-row .opt-next{grid-column:1 / -1}.opt-head span:nth-child(3),.opt-head span:nth-child(4){display:none}.opt-row .opt-next{grid-column:2/3}}
 .secret-row{display:flex;gap:8px;align-items:center}.secret-row input{flex:1;min-width:0;font-family:ui-monospace,monospace;font-size:12.5px}
-`;
+`+FLOW_CANVAS_CSS;
 const userDialog = String.raw`
 <dialog id="user-dlg" aria-labelledby="ud-title"><form class="dialog-body" id="ud-form" novalidate>
  <div class="dialog-head"><h2 id="ud-title"></h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
@@ -104,7 +105,11 @@ const userDialog = String.raw`
   <input id="bf-keyword" class="field" maxlength="30" placeholder="מילת המפתח (ההודעה כולה או המילה הראשונה בה)" hidden><p class="hint" id="bf-trigger-hint"></p>
   <label class="fld" id="bf-repeat-row" hidden><span>לקוח שכבר עבר את התהליך</span><select id="bf-repeat"><option value="once">לא נכנס אליו שוב (ברירת מחדל)</option><option value="always">כל הודעה חדשה שלו נקראת שוב כתשובה לשאלה הראשונה</option></select></label></div>
  <div class="grid2"><label class="fld"><span>שיחה נסגרת אחרי שקט של (שעות)</span><input type="number" id="bf-expire" min="1" max="720"></label><label class="fld"><span>הודעה לתשובה לא מזוהה</span><input id="bf-fallback" maxlength="300" placeholder="לא זיהינו את התשובה."></label></div>
- <div class="fld"><span class="label">שלבים</span><div class="steps" id="bf-steps"></div><div class="row"><button type="button" class="ghost" id="bf-add-step">`+svg('plus')+String.raw`הוספת שלב</button><span class="hint">השלב הראשון נשלח כשהתהליך מתחיל. תשובה לא מזוהה חוזרת על השאלה פעמיים ואז השיחה נסגרת. לקוח שמשיב במילת הסרה יוצא מהתהליך.</span></div></div>
+ <div class="fld"><div class="row"><span class="label">שלבים</span><div class="seg fc-view-toggle end" role="group" aria-label="תצוגה"><button type="button" data-view="canvas" aria-pressed="true">קנבס</button><button type="button" data-view="list" aria-pressed="false">רשימה</button></div></div>
+  <div id="bf-canvas"><div class="fc-bar"><button type="button" class="fc-add fc-b" data-fc-add="options">`+svg('plus')+String.raw`שאלה עם תשובות</button><button type="button" class="fc-add fc-p" data-fc-add="text">`+svg('plus')+String.raw`תשובה חופשית</button><button type="button" class="fc-add fc-k" data-fc-add="end">`+svg('plus')+String.raw`סיום</button><button type="button" class="ghost end" id="fc-layout">סידור אוטומטי</button></div>
+   <div class="fc-view" id="fc-view"><div class="fc-stage" id="fc-stage"><svg id="fc-edges" aria-hidden="true"></svg><div id="fc-nodes"></div></div></div>
+   <p class="hint fc-hint">גוררים כרטיס בכותרת שלו כדי להזיז. גוררים מהנקודה שמתחת לתשובה אל כרטיס כדי לחבר, או אל מקום ריק כדי ליצור שלב חדש. לחיצה כפולה על הנקודה מנתקת. משמעות התשובה, תגובת הבוט ושמירה בשדה נערכים בתצוגת הרשימה.</p></div>
+  <div class="steps" id="bf-steps" hidden></div><div class="row" id="bf-list-add" hidden><button type="button" class="ghost" id="bf-add-step">`+svg('plus')+String.raw`הוספת שלב</button><span class="hint">השלב הראשון נשלח כשהתהליך מתחיל. תשובה לא מזוהה חוזרת על השאלה פעמיים ואז השיחה נסגרת. לקוח שמשיב במילת הסרה יוצא מהתהליך.</span></div></div>
  <label class="check"><input type="checkbox" id="bf-active">התהליך פעיל</label>
  <div class="banner" id="bf-error" role="alert" hidden></div>
  <div class="dialog-foot"><button type="button" class="ghost danger" id="bf-delete">מחיקת התהליך</button><span class="end"></span><button type="button" class="ghost" data-close>ביטול</button><button type="submit" class="btn" id="bf-save">שמירה</button></div>
@@ -617,13 +622,14 @@ function renderFlows(){const body=$('b-rows');body.replaceChildren();
   tr.append(cell(f.name),cell(labelOf(f.system_number)),cell(f.trigger==='keyword'?'מילת מפתח "'+f.keyword+'"':TRIGGERS[f.trigger]),cell(nf.format(f.steps.length)),cell(nf.format(f.live)),cell(nf.format(f.answers)),st,ans);body.append(tr);}
  if(!FLOWS.length){const tr=el('tr');const td=cell('עדיין אין תהליכים','muted');td.colSpan=8;tr.append(td);body.append(tr);}}
 function smsParts(t){const len=t.replace(/\n/g,'\r\n').length;if(!len)return 0;const uni=/[^\x00-\x7f]/.test(t);return len<=(uni?70:140)?1:Math.ceil(len/(uni?67:134));}
+function narrowScreen(){return matchMedia('(max-width:760px)').matches;}
 function newStepId(){let n=0;for(const s of BF.steps)n=Math.max(n,Number(s.id.slice(1))||0);return 's'+(n+1);}
 function stepLabel(s){const i=BF.steps.indexOf(s);return 'שלב '+(i+1)+(s.text?': '+(s.text.length>28?s.text.slice(0,28)+'…':s.text):'');}
 function nextSelect(current,value,onChange){const sel=el('select','opt-next');const end=el('option','','סיום השיחה');end.value='';sel.append(end);
  for(const s of BF.steps)if(s!==current){const o=el('option','',stepLabel(s));o.value=s.id;sel.append(o);}sel.value=value||'';sel.addEventListener('change',function(){onChange(sel.value);});return sel;}
 function fieldSelect(value,label,onChange){const l=el('label','row hint');const sel=el('select');const none=el('option','','לא לשמור');none.value='';sel.append(none);for(const f of SETTINGS.contact_fields){const o=el('option','',f.label);o.value=f.id;sel.append(o);}
  sel.value=value||'';sel.addEventListener('change',function(){onChange(sel.value);});l.append(label,sel);return l;}
-function renderSteps(){const box=$('bf-steps');box.replaceChildren();
+function renderList(){const box=$('bf-steps');box.replaceChildren();
  // With a first question sent elsewhere, step 1 holds the replies to the customer's first message; its question text
  // is optional and only used to ask again after an unrecognized answer.
  BF.steps.forEach(function(s,i){const card=el('div','step-card');const head=el('div','step-head');const ext=BF.trigger==='external'&&i===0;head.append(el('b','','שלב '+(i+1)+(ext?' · תשובות להודעה הראשונה של הלקוח':'')));
@@ -644,20 +650,20 @@ function renderSteps(){const box=$('bf-steps');box.replaceChildren();
    const row=el('div','row');row.append(add,fieldSelect(s.field,'שמירת המשמעות בשדה',function(v){s.field=v;}));card.append(row);}
   else if(s.type==='text'){const row=el('div','row');const l=el('label','row hint');l.append('השלב הבא',nextSelect(s,s.next,function(v){s.next=v;}));row.append(l,fieldSelect(s.field,'שמירת התשובה בשדה',function(v){s.field=v;}));card.append(row);}
   box.append(card);});}
-function bfTrigger(t){const was=BF.trigger;BF.trigger=t;if((was==='external')!==(t==='external')&&$('bf-steps').children.length)renderSteps();for(const b of document.querySelectorAll('[data-trigger]'))b.setAttribute('aria-pressed',String(b.dataset.trigger===t));$('bf-keyword').hidden=t!=='keyword';$('bf-repeat-row').hidden=t!=='external';
+function bfTrigger(t){const was=BF.trigger;BF.trigger=t;if((was==='external')!==(t==='external')&&BF.steps.length)renderSteps();for(const b of document.querySelectorAll('[data-trigger]'))b.setAttribute('aria-pressed',String(b.dataset.trigger===t));$('bf-keyword').hidden=t!=='keyword';$('bf-repeat-row').hidden=t!=='external';
  $('bf-trigger-hint').textContent=t==='any'?'כל הודעה של לקוח שאינו באמצע שיחה מתחילה את התהליך. רק תהליך פעיל אחד במספר יכול לעבוד כך.':t==='keyword'?'הודעה שהיא מילת המפתח, או שמתחילה בה, מתחילה את התהליך.':t==='external'?'השאלה הראשונה נשלחת ממערכת אחרת, ולכן הבוט לא שולח אותה. הודעה של לקוח שאינו באמצע שיחה נקראת כתשובה לשלב הראשון (למשל 1, 2, 3), ולכל תשובה אפשר לכתוב את תגובת הבוט. תשובה לא מזוהה מקבלת את ההודעה לתשובה לא מזוהה, ואת נוסח השאלה אם כתבתם אותו בשלב הראשון. מילת מפתח של תהליך אחר קודמת לזה, ורק תהליך פעיל אחד במספר יכול לעבוד כך או על כל הודעה.':'התהליך מתחיל רק כשבוחרים אותו בחלון שליחת הודעה. השלב הראשון נשלח לנמענים, ותשובותיהם ממשיכות את התהליך.';}
 function openFlow(id){const f=id?FLOWS.find(function(x){return x.id===id;}):null;BF=f?JSON.parse(JSON.stringify({id:f.id,trigger:f.trigger,steps:f.steps})):{id:null,trigger:'any',steps:[{id:'s1',type:'options',text:'',options:[{reply:'1',meaning:'',next:''},{reply:'2',meaning:'',next:''}]}]};
  for(const s of BF.steps){if(s.type==='options'&&!s.options)s.options=[];}
  $('bf-title').textContent=f?'עריכת תהליך':'תהליך חדש';$('bf-name').value=f?f.name:'';const sel=$('bf-number');sel.replaceChildren();for(const n of NUMBERS){const o=el('option','',n.label+' · '+local(n.number));o.value=n.number;sel.append(o);}if(f)sel.value=f.system_number;
  $('bf-keyword').value=f&&f.keyword||'';$('bf-repeat').value=f&&f.repeat_mode||'once';$('bf-expire').value=String(f?f.expire_hours:24);$('bf-fallback').value=f?f.fallback:'';$('bf-active').checked=f?!!f.active:false;$('bf-delete').hidden=!f;$('bf-error').hidden=true;
- bfTrigger(BF.trigger);renderSteps();$('bf-dlg').showModal();$('bf-name').focus();}
+ $('bf-dlg').showModal();bfTrigger(BF.trigger);bfView(narrowScreen()?'list':'canvas');$('bf-name').focus();}
 for(const b of document.querySelectorAll('[data-trigger]'))b.addEventListener('click',function(){bfTrigger(b.dataset.trigger);});
 $('bf-add-step').addEventListener('click',function(){if(BF.steps.length>=30)return;BF.steps.push({id:newStepId(),type:'options',text:'',options:[{reply:'1',meaning:'',next:''},{reply:'2',meaning:'',next:''}]});renderSteps();});
 $('b-add').addEventListener('click',function(){openFlow(null);});
 $('b-rows').addEventListener('click',function(e){const a=e.target.closest('[data-answers]');if(a){openAnswers(Number(a.dataset.answers));return;}const tr=e.target.closest('tr[data-id]');if(tr)openFlow(Number(tr.dataset.id));});
 $('b-rows').addEventListener('keydown',function(e){if((e.key==='Enter'||e.key===' ')&&e.target.dataset.id){e.preventDefault();openFlow(Number(e.target.dataset.id));}});
 $('bf-form').addEventListener('submit',async function(e){e.preventDefault();$('bf-error').hidden=true;$('bf-save').disabled=true;
- const steps=BF.steps.map(function(s){return s.type==='end'?{id:s.id,type:'end',text:s.text}:s.type==='text'?{id:s.id,type:'text',text:s.text,next:s.next||'',field:s.field||''}:{id:s.id,type:'options',text:s.text,options:s.options,field:s.field||''};});
+ const steps=BF.steps.map(function(s){const at=s.pos?{pos:s.pos}:{};return s.type==='end'?{id:s.id,type:'end',text:s.text,...at}:s.type==='text'?{id:s.id,type:'text',text:s.text,next:s.next||'',field:s.field||'',...at}:{id:s.id,type:'options',text:s.text,options:s.options,field:s.field||'',...at};});
  try{const d=await post('/api/admin/flows/save',{id:BF.id,name:$('bf-name').value,system_number:$('bf-number').value,trigger:BF.trigger,keyword:$('bf-keyword').value,repeat_mode:$('bf-repeat').value,steps:steps,fallback:$('bf-fallback').value,expire_hours:Number($('bf-expire').value),active:$('bf-active').checked});
   $('bf-dlg').close();toast(BF.id?'התהליך עודכן':'התהליך נוסף');void d;await loadFlows();}catch(err){dlgError('bf-error',err);}finally{$('bf-save').disabled=false;}});
 $('bf-delete').addEventListener('click',async function(){const id=BF.id;$('bf-dlg').close();if(!await confirmAction('מחיקת תהליך','למחוק את התהליך, את השיחות הפעילות בו ואת התשובות שנאספו? ההודעות עצמן לא יימחקו.','מחיקה'))return;
@@ -765,5 +771,5 @@ async function loadAudit(reset){if(reset){auditBefore=null;$('a-rows').replaceCh
 $('a-more').addEventListener('click',function(){loadAudit(false).catch(error);});
 
 (async function(){try{await loadMe();}catch(e){error(e);return;}const fields=location.hash==='#fields';showTab(fields?'contacts':location.hash.slice(1));if(fields)openFields();})();
-`;
+`+FLOW_CANVAS_JS;
 export function adminPage(nonce:string):string { return shell(nonce,'ניהול · הודעות SMS',css,body,script); }

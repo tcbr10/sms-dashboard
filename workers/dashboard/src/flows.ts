@@ -6,6 +6,13 @@ import {seesCustomer,seesMessage} from './scope';
 // Bot flows: admins build them; users see a customer's bot state in the messages table and can turn the bot off or on
 // for a customer of their numbers.
 const STEP_ID = /^s[0-9]{1,3}$/;
+// Where the step sits on the flow canvas (the editor's layout); the bot never reads it.
+function position(v: unknown): {pos?:{x:number;y:number}} {
+ if (v === undefined || v === null) return {};
+ const p = v as Record<string,unknown>;
+ if (typeof p.x !== 'number' || typeof p.y !== 'number' || !Number.isFinite(p.x) || !Number.isFinite(p.y) || Math.abs(p.x) > 20000 || Math.abs(p.y) > 20000) throw new HttpError(400,'Invalid step position');
+ return {pos:{x:Math.round(p.x),y:Math.round(p.y)}};
+}
 // optionalFirst: a first question sent from another system needs no text here (it is only used to ask again).
 function steps(value: unknown, fields: Set<string>, optionalFirst = false): Step[] {
  if (!Array.isArray(value) || !value.length || value.length > 30) throw new HttpError(400,'A flow has 1 to 30 steps');
@@ -15,8 +22,9 @@ function steps(value: unknown, fields: Set<string>, optionalFirst = false): Step
  return value.map((raw, i) => {
   const s = raw as Record<string,unknown>; const n = 'Step '+(i+1);
   const t = optionalFirst && i === 0 && (s.text === undefined || s.text === null || (typeof s.text === 'string' && !s.text.trim())) ? '' : text(typeof s.text === 'string' ? s.text.trim() : s.text,n+' text',1000); const type = s.type;
-  if (type === 'end') return {id:s.id as string,text:t,type};
-  if (type === 'text') return {id:s.id as string,text:t,type,next:next(s.next),field:field(s.field)};
+  const at = position(s.pos);
+  if (type === 'end') return {id:s.id as string,text:t,type,...at};
+  if (type === 'text') return {id:s.id as string,text:t,type,next:next(s.next),field:field(s.field),...at};
   if (type !== 'options') throw new HttpError(400,n+': invalid type');
   if (!Array.isArray(s.options) || !s.options.length || s.options.length > 20) throw new HttpError(400,n+': 1 to 20 answer options');
   const seen = new Set<string>();
@@ -25,7 +33,7 @@ function steps(value: unknown, fields: Set<string>, optionalFirst = false): Step
    const meaning = typeof v.meaning === 'string' ? v.meaning.trim().slice(0,60) : '';
    const say = v.say === undefined || v.say === null ? '' : typeof v.say === 'string' && v.say.trim().length <= 1000 ? v.say.trim() : (() => { throw new HttpError(400,n+': a reply has at most 1,000 characters'); })();
    return {reply,meaning,next:next(v.next),...(say ? {say} : {})}; });
-  return {id:s.id as string,text:t,type,options,field:field(s.field)};
+  return {id:s.id as string,text:t,type,options,field:field(s.field),...at};
  });
 }
 // GET /api/bot/info?id=<message id>: the customer's bot state for that message's conversation, and the bot answer it gave.

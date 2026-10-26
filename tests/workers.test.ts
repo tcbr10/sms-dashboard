@@ -747,6 +747,11 @@ describe('first question sent from another system',()=>{
   await env.DB.prepare('UPDATE flows SET active=0').run();
   await api('admin@example.com','/api/admin/flows/save',{name:'רגיל',system_number:number,trigger:'any',steps:[{id:'s1',type:'options',text:'1 או 2?',options:[{reply:'1',meaning:'',next:'',say:'בחרת 1'},{reply:'2',meaning:'',next:''}]}],fallback:'',expire_hours:24,active:true});
   expect(await say('היי','0587654321')).toBe('1 או 2?');expect(await say('1','0587654321')).toBe('בחרת 1');});
+ it('keeps where each step sits on the flow canvas and rejects bad positions',async()=>{
+  const placed=steps.map((x,i)=>({...x,pos:{x:i*10.4,y:70}}));expect((await flow({steps:placed,active:false})).status).toBe(200);
+  const saved=((await body(api('admin@example.com','/api/admin/flows'))).flows as {steps:{id:string;pos?:{x:number;y:number}}[]}[])[0].steps;expect(saved.map(x=>x.pos)).toEqual(steps.map((_,i)=>({x:Math.round(i*10.4),y:70})));
+  expect((await flow({name:'בלי מקום',active:false})).status).toBe(200);expect((await flow({name:'רע',active:false,steps:steps.map(x=>({...x,pos:{x:'a',y:1}}))})).status).toBe(400);
+  expect((await flow({name:'רחוק',active:false,steps:steps.map(x=>({...x,pos:{x:1e9,y:1}}))})).status).toBe(400);});
  it('validates: one flow per number answers every message, and the first step must ask something',async()=>{expect((await flow()).status).toBe(200);
   expect((await api('admin@example.com','/api/admin/flows/save',{name:'כל הודעה',system_number:number,trigger:'any',steps,fallback:'',expire_hours:24,active:true})).status).toBe(409);
   expect((await flow({name:'עוד אחד'})).status).toBe(409);expect((await flow({name:'כבוי',active:false})).status).toBe(200);
