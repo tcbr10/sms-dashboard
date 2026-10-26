@@ -79,6 +79,9 @@ const body = header('chats',true) + String.raw`
    <label class="search field">`+svg('search')+String.raw`<input type="search" id="q" placeholder="חיפוש לפי מספר או פרטי לקוח" aria-label="חיפוש שיחות" maxlength="200"></label>
    <div class="c-states" id="states" role="group" aria-label="סינון לפי מצב"></div>
    <label class="row hint">תהליך<select id="flow" class="field"><option value="">כל התהליכים</option></select></label>
+   <div class="row hint"><span>הודעות מאז</span><input type="date" id="from-d" class="field" aria-label="תאריך התחלה"><input type="time" id="from-t" class="field" aria-label="שעת התחלה"><button type="button" class="ghost" id="from-clear" hidden>ניקוי</button></div>
+   <div class="row"><button type="button" class="ghost" id="export-xlsx">`+svg('download')+String.raw`ייצוא Excel</button><button type="button" class="ghost" id="export-csv">ייצוא CSV</button></div>
+   <p class="hint" id="export-note" hidden></p>
   </div>
   <div class="skeleton" id="skeleton"><div></div><div></div><div></div></div>
   <ul class="c-items" id="items"></ul>
@@ -111,11 +114,11 @@ const body = header('chats',true) + String.raw`
 const script = String.raw`
 const STATES={active:'בשיחה',done:'הסתיימה',blocked:'הבוט מושבת',opted_out:'ביקש הסרה'};
 const SUBMIT={pending:'בתהליך',accepted:'התקבלה',rejected:'נדחתה',unknown:'לא ידוע'};
-const C={threads:new Map(),next:null,sync:null,state:'',flow:'',q:'',counts:null,flows:[],sel:null,meta:null,msgs:new Map(),msgSync:null,older:null,loading:false,polling:false,gen:0,timer:0,countsAt:0};
+const C={threads:new Map(),next:null,sync:null,state:'',flow:'',from:'',q:'',counts:null,flows:[],sel:null,meta:null,msgs:new Map(),msgSync:null,older:null,loading:false,polling:false,gen:0,timer:0,countsAt:0};
 function key(t){return t.system_number+'|'+t.peer_number;}
 function contactName(contact,peer){const f=ME.contact_fields[0];const v=contact&&f&&contact[f.id];return v||local(peer);}
 function when(ms){const d=ymd(ms),now=today();return d===now?clockFmt.format(ms):d===shift(now,-1)?'אתמול':dayFmt.format(ms);}
-function params(){const p=new URLSearchParams();if(C.state)p.set('state',C.state);if(C.flow)p.set('flow',C.flow);if(C.q)p.set('q',C.q);return p;}
+function params(){const p=new URLSearchParams();if(C.state)p.set('state',C.state);if(C.flow)p.set('flow',C.flow);if(C.from)p.set('from',C.from);if(C.q)p.set('q',C.q);return p;}
 function writeUrl(){const p=params();if(C.sel){p.set('n',C.sel.system_number);p.set('p',C.sel.peer_number);}const s=p.toString();history.replaceState(null,'',s?'?'+s:location.pathname);}
 function readUrl(){const p=new URLSearchParams(location.search);C.state=STATES[p.get('state')]?p.get('state'):'';C.flow=/^[0-9]+$/.test(p.get('flow')||'')?p.get('flow'):'';C.q=(p.get('q')||'').slice(0,200);$('q').value=C.q;
  const n=normalize(p.get('n')||''),pe=normalize(p.get('p')||'');return n&&pe?{system_number:n,peer_number:pe}:null;}
@@ -136,7 +139,7 @@ function renderList(){const ul=$('items');ul.replaceChildren();const list=order(
   const meta=el('span','c-meta');meta.append(el('span','state-dot '+t.state),el('span','',STATES[t.state]+(t.flow?' · '+t.flow:'')+(ME.numbers.length>1?' · '+(labelOf(t.system_number)):'')));
   main.append(row,el('span','c-last',last.replace(/\s+/g,' ')),meta);b.append(av,main);b.addEventListener('click',function(){select(t);});li.append(b);ul.append(li);}
  $('skeleton').hidden=!(C.loading&&!list.length);const empty=!C.loading&&!list.length;$('list-empty').hidden=!empty;
- if(empty){const f=!!(C.state||C.flow||C.q);$('list-empty-title').textContent=f?'לא נמצאו שיחות':'עדיין אין שיחות בוט';$('list-empty-sub').textContent=f?'נסו לשנות את הסינון.':'שיחות יופיעו כאן כשלקוח יתחיל תהליך בוט.';}
+ if(empty){const f=!!(C.state||C.flow||C.q||C.from);$('list-empty-title').textContent=f?'לא נמצאו שיחות':'עדיין אין שיחות בוט';$('list-empty-sub').textContent=f?'נסו לשנות את הסינון.':'שיחות יופיעו כאן כשלקוח יתחיל תהליך בוט.';}
  $('more').hidden=!C.next;}
 function labelOf(n){const x=ME.numbers.find(function(y){return y.number===n;});return x?x.label:local(n);}
 async function loadList(){const g=++C.gen;C.loading=true;C.threads.clear();C.next=null;renderList();writeUrl();renderStates();loadCounts();
@@ -145,6 +148,37 @@ async function loadList(){const g=++C.gen;C.loading=true;C.threads.clear();C.nex
 $('more').addEventListener('click',async function(){if(!C.next)return;const b=this;b.disabled=true;try{const p=params();p.set('cursor',C.next);const d=await get('/api/chats?'+p);for(const t of d.threads)C.threads.set(key(t),t);C.next=d.next_cursor;renderList();}catch(e){toast(message(e));}finally{b.disabled=false;}});
 let qt=0;$('q').addEventListener('input',function(){clearTimeout(qt);qt=setTimeout(function(){const v=$('q').value.trim();if(v!==C.q){C.q=v;loadList();}},400);});
 $('flow').addEventListener('change',function(){C.flow=this.value;loadList();});
+// Only chats with a message from this date and time on are listed, and an export holds only those messages (Israel time).
+function setFrom(){const d=$('from-d').value;C.from=d?String(israelTime(d,$('from-t').value||'00:00')):'';$('from-clear').hidden=!d;loadList();}
+$('from-d').addEventListener('change',setFrom);$('from-t').addEventListener('change',function(){if($('from-d').value)setFrom();});
+$('from-clear').addEventListener('click',function(){$('from-d').value='';$('from-t').value='';setFrom();});
+// Export of the chosen flow's chats (the state and date filters apply): an Excel file with a summary per customer, the full
+// transcript and the answers, or just the transcript as CSV. Built here from pages of /api/chats/export.
+const EXPORT_MAX=50000,tf=new Intl.DateTimeFormat('he-IL',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+const MATCH={option:'תשובה מזוהה',text:'תשובה חופשית',none:'לא זוהתה'};let exporting=false;
+function exportNote(t){$('export-note').hidden=!t;$('export-note').textContent=t||'';}
+async function exportChats(kind){if(exporting)return;if(!C.flow){toast('בחרו תהליך לייצוא');return;}exporting=true;exportNote('מייצא…');
+ try{const p=new URLSearchParams();p.set('flow',C.flow);if(C.state)p.set('state',C.state);if(C.from)p.set('from',C.from);
+  let cursor=null,flow=null;const threads=[],messages=[],answers=[];
+  do{const q=new URLSearchParams(p);if(cursor!==null)q.set('cursor',String(cursor));const d=await get('/api/chats/export?'+q);flow=d.flow;for(const x of d.threads)threads.push(x);for(const x of d.messages)messages.push(x);for(const x of d.answers)answers.push(x);cursor=d.next_cursor;
+   exportNote('מייצא… '+nf.format(threads.length)+' שיחות');if(messages.length>EXPORT_MAX)throw new Error('הייצוא גדול מדי (יותר מ-'+nf.format(EXPORT_MAX)+' הודעות). אפשר לצמצם בעזרת תאריך התחלה או מצב.');}while(cursor!==null);
+  if(!threads.length){toast('אין שיחות לייצוא לפי הסינון הנוכחי');return;}
+  const fields=ME.contact_fields||[],qs=flow.steps.filter(function(x){return x.type!=='end';}),stepNo=function(id){const i=flow.steps.findIndex(function(x){return x.id===id;});return i<0?'':'שלב '+(i+1);};
+  const byThread=new Map(threads.map(function(t){return [t.id,t];})),byMsg=new Map(answers.map(function(a){return [a.message_id,a];}));
+  const who=function(m){return m.direction==='in'?'לקוח':m.bot&&m.sent_by==='בוט'?'בוט':m.sent_by||'נשלחה ממערכת אחרת';};
+  const result=function(m){const b=m.bot;if(!b||m.direction!=='in'||!b.match)return '';return (MATCH[b.match]||'')+(b.gave_up?' (הבוט ויתר)':b.retry?' (חזרה על השאלה)':'');};
+  const tHead=['לקוח','זמן','כותב','הודעה','שלב','תוצאה','משמעות'];
+  const tRows=messages.map(function(m){const t=byThread.get(m.thread),a=byMsg.get(m.id);return [local(t.peer_number),tf.format(m.occurred_at),who(m),m.body,m.bot&&m.bot.step?stepNo(m.bot.step):'',result(m),a&&a.meaning||''];});
+  const stamp=ymd(Date.now()),base=('שיחות בוט - '+flow.name).replace(/[\\/:*?"<>|]+/g,' ').trim()+' '+stamp;
+  if(kind==='csv'){const lines=[tHead].concat(tRows).map(function(r){return r.map(function(v){return csvCell(v,false);}).join(',');});download(new Blob([String.fromCharCode(0xfeff)+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}),base+'.csv');}
+  else{const last=new Map();for(const a of answers)last.set(a.peer_number+'|'+a.step,a);const counts=new Map();for(const m of messages)counts.set(m.thread,(counts.get(m.thread)||0)+1);
+   const sHead=['לקוח','מספר מערכת'].concat(fields.map(function(f){return f.label;}),['מצב','התחלה','הודעה אחרונה','הודעות'],qs.map(function(x){return stepNo(x.id)+': '+x.text.split('\n')[0].slice(0,40);}));
+   const sRows=threads.map(function(t){const c=t.contact||{};return [local(t.peer_number),labelOf(t.system_number)].concat(fields.map(function(f){return c[f.id]||'';}),[STATES[t.state],tf.format(t.started_at),tf.format(t.last_at),counts.get(t.id)||0],qs.map(function(x){const a=last.get(t.peer_number+'|'+x.id);return a?(a.meaning||a.answer):'';}));});
+   const aRows=answers.map(function(a){return [tf.format(a.at),local(a.peer_number),stepNo(a.step),a.question,a.answer,a.meaning||''];});
+   download(await xlsxBook([{name:'סיכום',head:sHead,data:sRows,widths:[16,16].concat(fields.map(function(){return 18;}),[12,19,19,9],qs.map(function(){return 22;}))},{name:'שיחות',head:tHead,data:tRows,widths:[16,19,12,60,10,18,16]},{name:'תשובות',head:['זמן','לקוח','שלב','שאלה','תשובה','משמעות'],data:aRows,widths:[19,16,10,40,24,16]}]),base+'.xlsx');}
+  toast('הקובץ מוכן ('+plural(threads.length,'שיחה אחת','שיחות')+')');}
+ catch(e){toast(message(e));}finally{exporting=false;exportNote('');}}
+$('export-xlsx').addEventListener('click',function(){exportChats('xlsx');});$('export-csv').addEventListener('click',function(){exportChats('csv');});
 
 // The chosen conversation. Messages come newest first in pages of 100 and are shown oldest first.
 async function select(t){C.sel={system_number:t.system_number,peer_number:t.peer_number};C.meta=null;C.msgs.clear();C.msgSync=null;C.older=null;
