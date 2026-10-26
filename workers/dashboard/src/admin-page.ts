@@ -43,6 +43,7 @@ const css = String.raw`
 .section-title{padding:12px 14px 4px;font-size:13px;font-weight:650;color:var(--ink2)}
 .url-cell{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr;text-align:right}
 #bf-dlg,#ba-dlg{width:min(900px,calc(100vw - 24px))}
+#cf-text{white-space:pre-line}
 .steps{display:grid;gap:12px}
 .step-card{display:grid;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--field)}
 .step-head{display:flex;align-items:center;gap:8px}.step-head .end{display:flex;gap:2px}.step-head b{font-size:14px}.step-head select{width:auto;min-height:32px}
@@ -280,7 +281,7 @@ const body = header('admin',false) + String.raw`
  </section>
  <section class="panel" data-panel="bot" hidden>
   <div class="toolbar"><span class="hint">תהליכים שעונים אוטומטית להודעות נכנסות ושואלים שאלה אחרי שאלה. התשובות נשמרות, ואפשר לשמור אותן בשדות אנשי הקשר.</span><button type="button" class="btn end" id="b-add">`+svg('plus')+String.raw`תהליך חדש</button></div>
-  <div class="table-wrap"><table class="list"><thead><tr><th><span>שם</span></th><th><span>מספר</span></th><th><span>התחלה</span></th><th><span>שלבים</span></th><th><span>שיחות פעילות</span></th><th><span>תשובות</span></th><th><span>סטטוס</span></th><th><span></span></th></tr></thead><tbody id="b-rows"></tbody></table></div>
+  <div class="table-wrap"><table class="list"><thead><tr><th><span>שם</span></th><th><span>מספר</span></th><th><span>התחלה</span></th><th><span>קהל</span></th><th><span>שלבים</span></th><th><span>שיחות פעילות</span></th><th><span>תשובות</span></th><th><span>סטטוס</span></th><th><span></span></th></tr></thead><tbody id="b-rows"></tbody></table></div>
  </section>
  <section class="panel" data-panel="forwards" hidden>
   <div class="toolbar"><span class="hint">הודעות נכנסות למספר נשלחות לכתובת Webhook. תקלה בכתובת לא משפיעה על קליטת ההודעות, ומשלוח שנכשל מנוסה שוב במשך כיממה.</span><button type="button" class="btn end" id="f-add">`+svg('plus')+String.raw`כלל חדש</button></div>
@@ -647,12 +648,14 @@ function fillAudience(value){const aud=$('bf-audience');aud.replaceChildren();co
 function parseNumbers(values){const ok=new Set();let bad=0;for(const v of values)for(const p of phonesIn(v)){if(p.number)ok.add(p.number);else bad++;}return {numbers:Array.from(ok),invalid:bad};}
 function typedValues(text){return text.split(/[;\n]+/).map(function(x){return x.trim();}).filter(Boolean);}
 async function fileValues(file){if(file.size>10485760)throw new Error('הקובץ גדול מדי (עד 10MB)');const rows=await readRows(file);if(!rows.length)throw new Error('הקובץ ריק');const pc=phoneColumn(rows);return rows.slice(pc.header?1:0).map(function(r){return r[pc.best];});}
-function audienceName(f){const l=f.audience_list_id==null?null:AUD.find(function(x){return x.id===f.audience_list_id;});return f.audience_list_id==null?'':' · לרשימה '+(l?l.name:'#'+f.audience_list_id);}
+function audienceText(f){if(f.trigger==='send')return 'מי שנשלחה אליו';if(f.audience_list_id==null)return 'כל הלקוחות';const l=AUD.find(function(x){return x.id===f.audience_list_id;});return l?l.name+' · '+plural(l.size,'מספר אחד','מספרים'):'רשימה #'+f.audience_list_id;}
+// What the server found when another active flow on the same number could answer the same customers.
+function overlapText(w){const n='"'+w.flow+'"';return w.kind==='audience_wins'?'התהליך '+n+' (לכל הלקוחות) לא יענה ללקוחות ברשימה של תהליך זה, כי תהליך עם רשימה קודם.':w.kind==='audience_loses'?'לקוחות ברשימה של התהליך '+n+' ייענו על ידיו ולא על ידי תהליך זה.':w.kind==='lists_share'?plural(w.count,'מספר אחד נמצא','מספרים נמצאים')+' ברשימות של התהליך '+n+' וגם של תהליך זה. הם ייענו על ידי '+(w.winner==='this'?'תהליך זה':n)+' (הוותיק מבין השניים).':w.kind==='keyword_first'?'מילת המפתח "'+w.keyword+'" של תהליך זה קודמת לתהליך '+n+', שעונה על כל הודעה.':'הודעה שמתחילה במילת המפתח "'+w.keyword+'" תיענה על ידי התהליך '+n+' ולא על ידי תהליך זה.';}
 function renderFlows(){const body=$('b-rows');body.replaceChildren();
  for(const f of FLOWS){const tr=el('tr','click');tr.tabIndex=0;tr.dataset.id=String(f.id);const st=el('td');st.append(el('span','tag'+(f.active?' accent':' off'),f.active?'פעיל':'כבוי'));
   const ans=el('td');const b=el('button','ghost','תשובות');b.type='button';b.dataset.answers=String(f.id);ans.append(b);if(f.active){const rc=el('button','ghost','רישום הודעה');rc.type='button';rc.dataset.record=String(f.id);rc.title='רישום הודעה שנשלחה ממערכת אחרת';ans.append(rc);}
-  tr.append(cell(f.name),cell(labelOf(f.system_number)),cell((f.trigger==='keyword'?'מילת מפתח "'+f.keyword+'"':TRIGGERS[f.trigger])+audienceName(f)),cell(nf.format(f.steps.length)),cell(nf.format(f.live)),cell(nf.format(f.answers)),st,ans);body.append(tr);}
- if(!FLOWS.length){const tr=el('tr');const td=cell('עדיין אין תהליכים','muted');td.colSpan=8;tr.append(td);body.append(tr);}}
+  tr.append(cell(f.name),cell(labelOf(f.system_number)),cell(f.trigger==='keyword'?'מילת מפתח "'+f.keyword+'"':TRIGGERS[f.trigger]),cell(audienceText(f)),cell(nf.format(f.steps.length)),cell(nf.format(f.live)),cell(nf.format(f.answers)),st,ans);body.append(tr);}
+ if(!FLOWS.length){const tr=el('tr');const td=cell('עדיין אין תהליכים','muted');td.colSpan=9;tr.append(td);body.append(tr);}}
 function smsParts(t){const len=t.replace(/\n/g,'\r\n').length;if(!len)return 0;const uni=/[^\x00-\x7f]/.test(t);return len<=(uni?70:140)?1:Math.ceil(len/(uni?67:134));}
 function narrowScreen(){return matchMedia('(max-width:760px)').matches;}
 function newStepId(){let n=0;for(const s of BF.steps)n=Math.max(n,Number(s.id.slice(1))||0);return 's'+(n+1);}
@@ -734,7 +737,8 @@ $('b-rows').addEventListener('keydown',function(e){if((e.key==='Enter'||e.key===
 $('bf-form').addEventListener('submit',async function(e){e.preventDefault();$('bf-error').hidden=true;$('bf-save').disabled=true;
  const steps=BF.steps.map(function(s){const at=s.pos?{pos:s.pos}:{};return s.type==='end'?{id:s.id,type:'end',text:s.text,...at}:s.type==='text'?{id:s.id,type:'text',text:s.text,next:s.next||'',field:s.field||'',...at}:{id:s.id,type:'options',text:s.text,options:s.options,field:s.field||'',...at};});
  try{const d=await post('/api/admin/flows/save',{id:BF.id,name:$('bf-name').value,system_number:$('bf-number').value,trigger:BF.trigger,keyword:$('bf-keyword').value,repeat_mode:$('bf-repeat').value,steps:steps,fallback:$('bf-fallback').value,expire_hours:Number($('bf-expire').value),audience_list_id:$('bf-audience').value?Number($('bf-audience').value):null,active:$('bf-active').checked});
-  $('bf-dlg').close();toast(BF.id?'התהליך עודכן':'התהליך נוסף');void d;await loadFlows();}catch(err){dlgError('bf-error',err);}finally{$('bf-save').disabled=false;}});
+  $('bf-dlg').close();toast(BF.id?'התהליך עודכן':'התהליך נוסף');await loadFlows();
+  if(d.warnings&&d.warnings.length)await confirmAction('שימו לב: חפיפה עם תהליכים אחרים במספר',d.warnings.map(overlapText).join('\n\n'),'הבנתי');}catch(err){dlgError('bf-error',err);}finally{$('bf-save').disabled=false;}});
 $('bf-delete').addEventListener('click',async function(){const id=BF.id;$('bf-dlg').close();if(!await confirmAction('מחיקת תהליך','למחוק את התהליך, את השיחות הפעילות בו ואת התשובות שנאספו? ההודעות עצמן לא יימחקו.','מחיקה'))return;
  try{await post('/api/admin/flows/delete',{id:id});toast('התהליך נמחק');await loadFlows();}catch(err){error(err);}});
 async function openAnswers(id){const f=FLOWS.find(function(x){return x.id===id;});try{BA={flow:f,answers:(await get('/api/admin/flows/answers?id='+id)).answers};}catch(err){error(err);return;}

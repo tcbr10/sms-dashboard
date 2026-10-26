@@ -240,6 +240,14 @@ describe('auto-reply bot',()=>{
   await env.DB.prepare("UPDATE flows SET active=0 WHERE name='לכולם'").run();expect(await say('היי','a5','0502222222')).toBe('');expect(await say('היי','a6','0501111111')).toBe('שלום לרשימה');
   expect((await flow({name:'לא קיימת',audience_list_id:9999,steps:one('x')})).status).toBe(400);
   const f=((await body(api(admin,'/api/admin/flows'))).flows as {name:string;audience_list_id:number|null}[]);expect(f.find(x=>x.name==='לרשימה')!.audience_list_id).toBe(list);expect(f.find(x=>x.name==='לכולם')!.audience_list_id).toBeNull();});
+ it('tells which other flows could answer the same customers, without blocking the save',async()=>{
+  const admin='admin@example.com',one=(text:string)=>[{id:'s1',type:'end',text}],mk=async(name:string)=>(await body(api(admin,'/api/lists/save',{name,shared:true,numbers:['0501111111','0502222222']}))).id as number;
+  const warnings=async(b:Record<string,unknown>)=>{const r=await body(flow({steps:one('x'),...b}));return r.warnings as Record<string,unknown>[];};
+  expect(await warnings({name:'לכולם'})).toEqual([]);const a=await mk('א'),b=await mk('ב');
+  expect(await warnings({name:'לרשימה א',audience_list_id:a})).toEqual([{kind:'audience_wins',flow:'לכולם'}]);
+  expect(await warnings({name:'לרשימה ב',audience_list_id:b})).toEqual([{kind:'audience_wins',flow:'לכולם'},{kind:'lists_share',flow:'לרשימה א',count:2,winner:'other'}]);
+  expect(await warnings({name:'מבצע',trigger:'keyword',keyword:'מבצע'})).toEqual(['לכולם','לרשימה א','לרשימה ב'].map(f=>({kind:'keyword_first',flow:f,keyword:'מבצע'})));
+  expect(await warnings({name:'כבוי',active:false,trigger:'keyword',keyword:'כבוי'})).toEqual([]);expect(await warnings({name:'מהלוח',trigger:'send'})).toEqual([]);});
  it('stops for opt-outs and blocked customers, expires idle conversations and prefers keyword flows',async()=>{await flow();await flow({name:'מבצע',trigger:'keyword',keyword:'מבצע',steps:[{id:'s1',type:'end',text:'פרטי המבצע: ...'}]});
   expect(await say('מבצע עכשיו')).toBe('פרטי המבצע: ...');expect(await say('שלום')).toBe('מעוניינים? 1 כן 2 לא');
   await env.DB.prepare('UPDATE conversations SET expires_at=1').run();expect(await say('2')).toBe('מעוניינים? 1 כן 2 לא');

@@ -37,6 +37,30 @@ function steps(value: unknown, fields: Set<string>, optionalFirst = false): Step
   return {id:s.id as string,text:t,type,options,field:field(s.field),...at};
  });
 }
+// Where another active flow on the same number could answer the same customer. Saving is never blocked by these (a
+// clash of two flows for the same audience is refused separately); the editor tells the admin who wins in each case.
+// The bot's order: a keyword flow first, then one whose first question was sent elsewhere, then any-message flows; within
+// one kind a flow with an audience wins over one for everyone, and then the older flow wins.
+type Overlap = {kind:'audience_wins'|'audience_loses'|'lists_share'|'keyword_first'|'keyword_yields';flow:string;count?:number;keyword?:string;winner?:'this'|'other'};
+async function overlaps(env: Env, id: number, system: string, trigger: string, keyword: string|null, audience: number|null): Promise<Overlap[]> {
+ if (trigger === 'send') return [];
+ const others = (await env.DB.prepare("SELECT id,name,trigger,keyword,audience_list_id AS audience FROM flows WHERE system_number=? AND active=1 AND id!=? AND trigger!='send'").bind(system,id).all<{id:number;name:string;trigger:string;keyword:string|null;audience:number|null}>()).results;
+ const every = (t: string) => t === 'any' || t === 'external'; const out: Overlap[] = [];
+ for (const o of others) {
+  const sameKind = (every(trigger) && every(o.trigger)) || (trigger === 'keyword' && o.trigger === 'keyword' && o.keyword === keyword);
+  const keywordVsAll = (trigger === 'keyword' && every(o.trigger)) || (every(trigger) && o.trigger === 'keyword');
+  if (!sameKind && !keywordVsAll) continue;
+  let shared: number|null = null; // customers on both audiences, when both are lists
+  if (audience !== null && o.audience !== null && audience !== o.audience) { shared = (await env.DB.prepare('SELECT COUNT(*) AS n FROM list_members a WHERE a.list_id=?1 AND EXISTS (SELECT 1 FROM list_members b WHERE b.list_id=?2 AND b.number=a.number)').bind(audience,o.audience).first<{n:number}>())?.n ?? 0; if (!shared) continue; }
+  if (sameKind) {
+   if (audience === null && o.audience !== null) out.push({kind:'audience_loses',flow:o.name});
+   else if (audience !== null && o.audience === null) out.push({kind:'audience_wins',flow:o.name});
+   else if (shared !== null) out.push({kind:'lists_share',flow:o.name,count:shared,winner:id < o.id ? 'this' : 'other'});
+  } else if (trigger === 'keyword') out.push({kind:'keyword_first',flow:o.name,keyword:keyword!});
+  else out.push({kind:'keyword_yields',flow:o.name,keyword:o.keyword!});
+ }
+ return out;
+}
 // GET /api/bot/info?id=<message id>: the customer's bot state for that message's conversation, and the bot answer it gave.
 export async function botInfo(url: URL, env: Env, user: User): Promise<Response> {
  const id = Number(url.searchParams.get('id')); if (!Number.isSafeInteger(id)) throw new HttpError(400,'Invalid id');
@@ -94,7 +118,7 @@ export async function flows(request: Request, path: string, url: URL, env: Env, 
   else { const r = await env.DB.prepare('UPDATE flows SET name=?,system_number=?,trigger=?,keyword=?,steps=?,fallback=?,expire_hours=?,active=?,repeat_mode=?,audience_list_id=?,updated_at=? WHERE id=?').bind(...values,id).run(); if (!r.meta.changes) throw new HttpError(404,'Flow not found'); saved = id as number; }
   // Conversations waiting on a step that no longer exists are ended.
   await env.DB.batch([env.DB.prepare('DELETE FROM conversations WHERE flow_id=? AND step NOT IN (SELECT json_extract(value,\'$.id\') FROM json_each(?))').bind(saved,JSON.stringify(list)),audit(env,user.email,'flow.save',name,{id:saved,system_number:system,trigger,...(trigger === 'external' ? {repeat_mode:repeat} : {}),steps:list.length,...(audience !== null ? {audience_list_id:audience} : {}),active:!!body.active})]);
-  return json({ok:true,id:saved});
+  return json({ok:true,id:saved,warnings:body.active ? await overlaps(env,saved,system,trigger,keyword,audience as number|null) : []});
  }
 // POST /api/admin/flows/record: a first message that another system already sent is written into this system, once per
 // number, as the flow's opening message (nothing is sent). It shows at the start of the chat, the customers are put at
