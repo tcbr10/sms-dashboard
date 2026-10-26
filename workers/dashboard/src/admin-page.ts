@@ -158,7 +158,7 @@ const userDialog = String.raw`
 <dialog id="br-dlg" aria-labelledby="br-title"><form class="dialog-body" id="br-form" novalidate>
  <div class="dialog-head"><h2 id="br-title">רישום הודעה שנשלחה ממערכת אחרת</h2><button type="button" class="icon-btn" data-close aria-label="סגירה">`+svg('close')+String.raw`</button></div>
  <p class="hint" id="br-flow"></p>
- <p class="hint">ההודעה לא נשלחת שוב. היא נרשמת כאן כהודעה יוצאת שנשלחה, ומופיעה בתחילת השיחה של כל מספר. תשובות הלקוחות ימשיכו את התהליך, והם יופיעו בעמוד שיחות בוט. מספרים שביקשו הסרה, או שהבוט כבוי להם, מדולגים.</p>
+ <p class="hint">ההודעה לא נשלחת שוב. היא נרשמת כאן כהודעה יוצאת שנשלחה, ומופיעה בתחילת השיחה של כל מספר, לפי מועד השליחה שתזינו. לקוחות שכבר בתהליך (ענו, או שהבוט כבר קרא את תשובתם) נשארים בשלב שלהם ולא מקבלים הודעה חדשה, ושאר הלקוחות יוכנסו לשלב הראשון כדי שתשובותיהם ימשיכו את התהליך. מספרים שביקשו הסרה, או שהבוט כבוי להם, מדולגים.</p>
  <label class="fld"><span>נוסח ההודעה שנשלחה</span><textarea id="br-body" rows="4" maxlength="1000"></textarea></label>
  <div class="grid2"><label class="fld"><span>תאריך השליחה</span><input type="date" id="br-date"></label><label class="fld"><span>שעה (שעון ישראל)</span><input type="time" id="br-time"></label></div>
  <label class="fld"><span>נמענים מרשימה</span><select id="br-list"></select></label>
@@ -723,11 +723,11 @@ $('br-form').addEventListener('submit',async function(e){e.preventDefault();$('b
  try{if(!$('br-body').value.trim())throw new Error('כתבו את נוסח ההודעה שנשלחה');if(!$('br-date').value||!$('br-time').value)throw new Error('בחרו תאריך ושעה');const sentAt=israelTime($('br-date').value,$('br-time').value);if(sentAt>Date.now())throw new Error('מועד השליחה עדיין לא הגיע');
   let all=brNumbers().numbers;const lid=$('br-list').value;if(lid)all=Array.from(new Set(all.concat((await get('/api/lists/members?id='+lid)).numbers)));
   if(!all.length)throw new Error('אין נמענים לרישום');
-  if(!await confirmAction('רישום הודעה','לרשום את ההודעה כנשלחה אל '+plural(all.length,'מספר אחד','מספרים')+'? ההודעה לא תישלח שוב, והלקוחות יוכנסו לשלב הראשון של התהליך.','רישום')){$('br-go').disabled=false;return;}
-  const id=crypto.randomUUID();let added=0,skipped=0,invalid=0;$('br-bar').hidden=false;
+  if(!await confirmAction('רישום הודעה','לרשום את ההודעה כנשלחה אל '+plural(all.length,'מספר אחד','מספרים')+'? ההודעה לא תישלח שוב. לקוחות שכבר בתהליך נשארים בשלב שלהם.','רישום')){$('br-go').disabled=false;return;}
+  const id=crypto.randomUUID();let added=0,skipped=0,invalid=0,kept=0;$('br-bar').hidden=false;
   for(let i=0;i<all.length;i+=500){$('br-status').textContent=nf.format(i)+' / '+nf.format(all.length);$('br-progress').style.width=Math.round(i*100/all.length)+'%';
-   const d=await post('/api/admin/flows/record',{flow_id:BR.flow.id,record_id:id,body:$('br-body').value,sent_at:sentAt,numbers:all.slice(i,i+500)});added+=d.added;skipped+=d.skipped;invalid+=d.invalid;}
-  $('br-dlg').close();toast(plural(added,'מספר אחד נרשם','מספרים נרשמו')+(skipped?' · '+nf.format(skipped)+' דולגו (הסרה או בוט כבוי)':'')+(invalid?' · '+nf.format(invalid)+' לא תקינים':''));await loadFlows();}
+   const d=await post('/api/admin/flows/record',{flow_id:BR.flow.id,record_id:id,body:$('br-body').value,sent_at:sentAt,numbers:all.slice(i,i+500)});added+=d.added;skipped+=d.skipped;invalid+=d.invalid;kept+=d.kept;}
+  $('br-dlg').close();toast(plural(added,'מספר אחד נרשם','מספרים נרשמו')+(kept?' · '+nf.format(kept)+' כבר בתהליך ונשארו בשלב שלהם':'')+(skipped?' · '+nf.format(skipped)+' דולגו (הסרה או בוט כבוי)':'')+(invalid?' · '+nf.format(invalid)+' לא תקינים':''));await loadFlows();}
  catch(err){dlgError('br-error',err);}finally{$('br-go').disabled=false;}});
 $('b-rows').addEventListener('click',function(e){const a=e.target.closest('[data-answers]');if(a){openAnswers(Number(a.dataset.answers));return;}const rc=e.target.closest('[data-record]');if(rc){openRecord(Number(rc.dataset.record));return;}const tr=e.target.closest('tr[data-id]');if(tr)openFlow(Number(tr.dataset.id));});
 $('b-rows').addEventListener('keydown',function(e){if((e.key==='Enter'||e.key===' ')&&e.target.dataset.id){e.preventDefault();openFlow(Number(e.target.dataset.id));}});

@@ -1,6 +1,6 @@
 import {Env,HttpError,json,phone,readBody,recipient,text} from '../../../shared/validation';
 import {loadSettings} from '../../../shared/settings';
-import {Flow,Step,enterMany,loadFlow,normalizeReply,openThreads,parseFlow,touchThreads} from '../../../shared/bot';
+import {Flow,Step,enterMany,loadFlow,normalizeReply,parseFlow,touchThreads} from '../../../shared/bot';
 import {User,audit} from './users';
 import {seesCustomer,seesMessage} from './scope';
 // Bot flows: admins build them; users see a customer's bot state in the messages table and can turn the bot off or on
@@ -98,7 +98,7 @@ export async function flows(request: Request, path: string, url: URL, env: Env, 
  }
 // POST /api/admin/flows/record: a first message that another system already sent is written into this system, once per
 // number, as the flow's opening message (nothing is sent). It shows at the start of the chat, the customers are put at
-// the flow's first step so their replies continue it, and the bot chats page lists them. The browser sends up to 500
+// the flow's first step so their replies continue it (unless they are already in the flow, then their progress stays), and the bot chats page lists them. The browser sends up to 500
 // numbers per call under one record_id, so a repeated call adds nothing twice. Opted-out and bot-blocked numbers are skipped.
  if (path === 'flows/record') {
   const flowId = body.flow_id; if (!Number.isSafeInteger(flowId)) throw new HttpError(400,'Invalid flow');
@@ -109,14 +109,18 @@ export async function flows(request: Request, path: string, url: URL, env: Env, 
   if (!Array.isArray(body.numbers) || !body.numbers.length || body.numbers.length > 500) throw new HttpError(400,'Send 1 to 500 numbers at a time');
   const numbers = new Set<string>(); let invalid = 0; for (const n of body.numbers) { try { numbers.add(recipient(n)); } catch { invalid++; } }
   const eligible = (await env.DB.prepare('SELECT value FROM json_each(?1) WHERE value NOT IN (SELECT number FROM opt_outs) AND value NOT IN (SELECT peer_number FROM bot_blocks WHERE system_number=?2)').bind(JSON.stringify([...numbers]),flow.system_number).all<{value:string}>()).results.map(r => r.value);
+  // Customers already in this flow (a conversation, an answer, or a first reply the bot read) keep their progress: the
+  // bot answered them already, so only the opening message is added to their chat. The others start at the first step.
+  const fresh = eligible.length ? (await env.DB.prepare('SELECT value FROM json_each(?1) WHERE NOT EXISTS (SELECT 1 FROM conversations c WHERE c.system_number=?2 AND c.peer_number=value AND c.flow_id=?3) AND NOT EXISTS (SELECT 1 FROM bot_answers a WHERE a.system_number=?2 AND a.peer_number=value AND a.flow_id=?3) AND NOT EXISTS (SELECT 1 FROM flow_customers f WHERE f.flow_id=?3 AND f.peer_number=value)').bind(JSON.stringify(eligible),flow.system_number,flow.id).all<{value:string}>()).results.map(r => r.value) : [];
   const now = Date.now(); const first = flow.steps[0];
   const results = await env.DB.batch([
    env.DB.prepare("INSERT INTO messages (event_key,direction,system_number,peer_number,body,occurred_at,received_at,time_source,submission_status,updated_at,sent_by,bot) SELECT json_array('out','first:'||?1||':'||value),'out',?2,value,?3,?4,?5,'provider','accepted',?5,?6,?7 FROM json_each(?8) WHERE true ON CONFLICT(event_key) DO NOTHING").bind(recordId,flow.system_number,message,at,now,OTHER_SYSTEM,JSON.stringify({flow:flow.id,step:first.id,start:true,external:true}),JSON.stringify(eligible)),
-   enterMany(env,flow,first,flow.system_number,eligible,now),
-   openThreads(env,flow.system_number,eligible,flow.id,now),
-   audit(env,user.email,'flow.record',flow.name,{id:flow.id,record_id:recordId,numbers:eligible.length}),
+   enterMany(env,flow,first,flow.system_number,fresh,now),
+   // The chat starts when the message was sent. updated_at moves forward, so live updates see the change.
+   env.DB.prepare('INSERT INTO bot_threads (system_number,peer_number,flow_id,started_at,last_at,updated_at) SELECT ?1,value,?2,?3,?3,?4 FROM json_each(?5) WHERE true ON CONFLICT(system_number,peer_number) DO UPDATE SET flow_id=excluded.flow_id,started_at=MIN(bot_threads.started_at,excluded.started_at),last_at=MAX(bot_threads.last_at,excluded.last_at),updated_at=MAX(excluded.updated_at,bot_threads.updated_at+1)').bind(flow.system_number,flow.id,at,now,JSON.stringify(eligible)),
+   audit(env,user.email,'flow.record',flow.name,{id:flow.id,record_id:recordId,numbers:eligible.length,kept:eligible.length - fresh.length}),
   ]);
-  return json({ok:true,added:results[0].meta.changes,invalid,skipped:numbers.size - eligible.length});
+  return json({ok:true,added:results[0].meta.changes,invalid,skipped:numbers.size - eligible.length,kept:eligible.length - fresh.length});
  }
  if (path === 'flows/delete') {
   const id = body.id; if (!Number.isSafeInteger(id)) throw new HttpError(400,'Invalid flow'); const f = await env.DB.prepare('SELECT name FROM flows WHERE id=?').bind(id).first<{name:string}>(); if (!f) throw new HttpError(404,'Flow not found');
