@@ -241,8 +241,11 @@ function confirmAction(titleText,text,okText,checkLabel){return new Promise(func
 // Popover menus anchored under a button or header; one at a time, closed by Escape or a click outside.
 let openMenu=null;
 function closeMenu(){if(!openMenu)return;openMenu.el.remove();if(openMenu.onClose)openMenu.onClose();openMenu=null;}
-function popover(anchor,build,onClose){closeMenu();const m=el('div','menu');m.setAttribute('role','dialog');build(m);document.body.append(m);openMenu={el:m,anchor:anchor,onClose:onClose};placeMenu();const f=m.querySelector('input,button,select');if(f)f.focus({preventScroll:true});return m;}
-function placeMenu(){if(!openMenu)return;const r=openMenu.anchor.getBoundingClientRect(),m=openMenu.el;m.style.top=(r.bottom+window.scrollY+4)+'px';m.style.left=Math.max(8,Math.min(r.right-m.offsetWidth,document.documentElement.clientWidth-m.offsetWidth-8))+window.scrollX+'px';}
+function popover(anchor,build,onClose){closeMenu();const m=el('div','menu');m.setAttribute('role','dialog');build(m);// Opened from inside a modal dialog, the menu goes into that dialog: the dialog sits in the browser's top layer, above anything in the page body.
+ const host=anchor.closest('dialog[open]')||document.body;host.append(m);openMenu={el:m,anchor:anchor,onClose:onClose,host:host};placeMenu();const f=m.querySelector('input,button,select');if(f)f.focus({preventScroll:true});return m;}
+function placeMenu(){if(!openMenu)return;const r=openMenu.anchor.getBoundingClientRect(),m=openMenu.el,host=openMenu.host;
+ if(host!==document.body){const h=host.getBoundingClientRect();m.style.top=(r.bottom-h.top-host.clientTop+host.scrollTop+4)+'px';m.style.left=(Math.max(8,Math.min(r.right-h.left-m.offsetWidth,host.clientWidth-m.offsetWidth-8))+host.scrollLeft)+'px';return;}
+ m.style.top=(r.bottom+window.scrollY+4)+'px';m.style.left=Math.max(8,Math.min(r.right-m.offsetWidth,document.documentElement.clientWidth-m.offsetWidth-8))+window.scrollX+'px';}
 document.addEventListener('mousedown',function(e){if(openMenu&&!openMenu.el.contains(e.target)&&!openMenu.anchor.contains(e.target))closeMenu();},true);
 // Header menus are redrawn while open, so focus returns to the matching header if the original anchor is gone.
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&openMenu){const a=openMenu.anchor;closeMenu();const t=a.isConnected?a:a.dataset.col?document.querySelector('th[data-col="'+a.dataset.col+'"] button'):null;if(t)t.focus();}});
